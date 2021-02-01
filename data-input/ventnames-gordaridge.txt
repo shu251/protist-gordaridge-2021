@@ -1,0 +1,35 @@
+SAMPLENAME	LOCATION	LOCATION_SPECIFIC	SAMPLEID	Sampletype	LocationName	Sample_or_Control	Sample_or_BSW
+Axial_ExtractControl_CTRL_2019	ExtractControl	ExtractControl	CTRL	Control	Lab blank	Control Sample	Control
+GordaRidge_Plume001_T0_2019_REP12	GordaRidge	Plume001	T0	Grazing	Near vent BW	True Sample	True Sample
+GordaRidge_Plume001_T24_2019_REP12	GordaRidge	Plume001	T24	Grazing	Near vent BW	True Sample	True Sample
+GordaRidge_Plume001_T36_2019_REP12	GordaRidge	Plume001	T36	Grazing	Near vent BW	True Sample	True Sample
+GordaRidge_Vent013_T0_2019_REP13	GordaRidge	Vent013	T0	Grazing	Mt Edwards Vent	True Sample	True Sample
+GordaRidge_Vent013_T36_2019_REP12	GordaRidge	Vent013	T36	Grazing	Mt Edwards Vent	True Sample	True Sample
+GordaRidge_Vent013_T36_2019_REP34	GordaRidge	Vent013	T36	Grazing	Mt Edwards Vent	True Sample	True Sample
+GordaRidge_Vent043_T0_2019_REP13	GordaRidge	Vent043	T0	Grazing	Venti Latte Vent	True Sample	True Sample
+GordaRidge_Vent043_T36_2019_REP13	GordaRidge	Vent043	T36	Grazing	Venti Latte Vent	True Sample	True Sample
+GordaRidge_Vent110_T24_2019	GordaRidge	Vent110	T24	Grazing	SirVentsAlot Vent	True Sample	True Sample
+GordaRidge_Vent090_T24_2019	GordaRidge	Vent090	T24	Grazing	Candelabra Vent	True Sample	True Sample
+GordaRidge_Plume001_T0_2019_REP34	GordaRidge	Plume001	T0	Grazing	Near vent BW	True Sample	True Sample
+GordaRidge_Plume001_sterivex_2019_REPa	GordaRidge	Plume001	sterivex	in situ	Near vent BW	True Sample	True Sample
+GordaRidge_Plume001_sterivex_2019_REPb	GordaRidge	Plume001	sterivex	in situ	Near vent BW	True Sample	True Sample
+GordaRidge_Shipblank_CTRL_2019_S31	GordaRidge	Shipblank	CTRL	control	Shipblank	Control Sample	Control
+GordaRidge_Shipblank_CTRL_2019_S32	GordaRidge	Shipblank	CTRL	control	Shipblank	Control Sample	Control
+GordaRidge_Shipblank_CTRL_2019_S33	GordaRidge	Shipblank	CTRL	control	Shipblank	Control Sample	Control
+GordaRidge_BSW020_sterivex_2019_REPa	GordaRidge	BSW020	sterivex	in situ	Deep seawater	True Sample	BSW
+GordaRidge_Plume036_sterivex_2019_REPb	GordaRidge	Plume036	sterivex	in situ	Plume	True Sample	True Sample
+GordaRidge_BSW056_sterivex_2019_REPb	GordaRidge	BSW056	sterivex	in situ	Deep seawater	True Sample	BSW
+GordaRidge_BSW081_sterivex_2019	GordaRidge	BSW081	sterivex	in situ	Shallow seawater	True Sample	BSW
+GordaRidge_Plume096_sterivex_2019	GordaRidge	Plume096	sterivex	in situ	Plume	True Sample	True Sample
+GordaRidge_Vent009_SUPRS1_2019	GordaRidge	Vent009	SUPRS1	in situ	Mt Edwards Vent	True Sample	True Sample
+GordaRidge_Vent039_SUPRS1_2019	GordaRidge	Vent039	SUPRS1	in situ	Venti Latte Vent	True Sample	True Sample
+GordaRidge_Vent086_SUPRS1_2019	GordaRidge	Vent086	SUPRS1	in situ	Candelabra Vent	True Sample	True Sample
+GordaRidge_Vent105_SUPRS9_2019	GordaRidge	Vent105	SUPRS9	in situ	SirVentsAlot Vent	True Sample	True Sample
+GordaRidge_Vent010_SUPRS2_2019	GordaRidge	Vent010	SUPRS2	in situ	Mt Edwards Vent	True Sample	True Sample
+GordaRidge_Vent011_SUPRS3_2019	GordaRidge	Vent011	SUPRS3	in situ	Mt Edwards Vent	True Sample	True Sample
+GordaRidge_Vent040_SUPRS2_2019	GordaRidge	Vent040	SUPRS2	in situ	Venti Latte Vent	True Sample	True Sample
+GordaRidge_Vent041_SUPRS3_2019	GordaRidge	Vent041	SUPRS3	in situ	Venti Latte Vent	True Sample	True Sample
+GordaRidge_Vent087_SUPRS2_2019	GordaRidge	Vent087	SUPRS2	in situ	Candelabra Vent	True Sample	True Sample
+GordaRidge_Vent088_SUPRS3_2019	GordaRidge	Vent088	SUPRS3	in situ	Candelabra Vent	True Sample	True Sample
+GordaRidge_Vent106_SUPRS10_2019	GordaRidge	Vent106	SUPRS10	in situ	SirVentsAlot Vent	True Sample	True Sample
+GordaRidge_Vent107_SUPRS11_2019	GordaRidge	Vent107	SUPRS11	in situ	SirVentsAlot Vent	True Sample	True Sample

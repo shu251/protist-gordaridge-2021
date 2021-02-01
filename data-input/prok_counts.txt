@@ -1,0 +1,14 @@
+Sample_Num	Specific_Site	Sample location	Prok_count	Vent name
+NA108-036	Plume036	Plume	76899.48662	Mt Edwards2
+NA108-013	Mt Edwards	Vent	76206.69845	Mt Edwards
+NA108-089	Candelabra	Vent	55076.65933	Candelabra
+NA108-100	Octopus Springs	Vent	44684.83682	Octopus Springs
+NA108-051	Purple Rain	Vent	65814.87593	Purple Rain
+NA108-108	SirVentsalot	Vent	52998.29483	SirVentsalot
+NA108-042	Venti latte	Vent	111192.5009	Venti latte
+NA108-003	BSW003	BSW	73435.54578	Water column
+NA108-001	Plume001	Plume	51959.11258	Mt Edwards
+NA108-20	BSW020	BSW	45724.01907	Water column
+NA108-012	Mt Edwards	Vent	26672.34446	Mt Edwards
+NA108-018	Gordita	Vent	30136.2853	Gordita
+NA108-056	BSW056	BSW	32561.04388	Water column

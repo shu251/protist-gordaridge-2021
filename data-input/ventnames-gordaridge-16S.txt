@@ -1,0 +1,32 @@
+SAMPLEID_16S	SAMPLE_AMY	Sampletype	SAMPLEID	LocationName	STATUS	FLUIDORIGIN
+NA08051STEP	SUPR BAG Purple Rain	in situ	SUPR	Purple Rain Vent	keep	S9
+NA080051STEP	SUPR BAG Purple Rain	in situ	SUPR	Purple Rain Vent	keep	S9
+NA108001aSTEP	Niskin Plume Mt. Edwards	in situ	sterivex	Mt Edwards Plume	keep	Niskin7
+NA108001bSTEP	Niskin Plume Mt. Edwards	in situ	sterivex	Mt Edwards Plume	keep	Niskin7
+NA108003STEP	Niskin BSW	in situ	sterivex	Deep seawater	old	Niskin10
+NA108003STEP20200226	Niskin BSW	in situ	sterivex	Deep seawater	keep	Niskin10
+NA108009STEP	SUPR Filter Mt. Edwards	in situ	SUPR	Mt Edwards Vent	keep	S1
+NA108010STEP	SUPR Filter Mt. Edwards	in situ	SUPR	Mt Edwards Vent	keep	S2
+NA108012STEP	SUPR BAG Mt. Edwards	in situ	SUPR	Mt Edwards Vent	keep	S7
+NA108020aSTEP	Niskin BSW	in situ	sterivex	Deep seawater	keep	Niskins6-12
+NA108020bSTEP	Niskin BSW	in situ	sterivex	Deep seawater	keep	Niskins6-12
+NA108036aSTEP	Niskin Plume	in situ	sterivex	Mt Edwards Plume	keep	Niskin7-12
+NA108036bSTEP	Niskin Plume	in situ	sterivex	Mt Edwards Plume	keep	Niskin7-12
+NA108039STEP	SUPR Filter Venti Latte	in situ	SUPR	Venti Latte Vent	old	S1
+NA108039STEP20200226	SUPR Filter Venti Latte	in situ	SUPR	Venti Latte Vent	keep	S1
+NA108041STEP	SUPR Filter Venti Latte	in situ	SUPR	Venti Latte Vent	keep	S3
+NA108042STEP	SUPR BAG Venti Latte	in situ	SUPR	Venti Latte Vent	keep	S7
+NA108049STEP	SUPR Filter Purple Rain	in situ	SUPR	Purple Rain Vent	keep	S5
+NA108052STEP	Blue Ciliate	in situ	SUPR	Blue Ciliate	keep	Mat
+NA108056aSTEP	Niskin BSW	in situ	sterivex	Deep seawater	keep	Niskin7
+NA108056bSTEP	Niskin BSW	in situ	sterivex	Deep seawater	keep	Niskin7
+NA108081STEP	150m Niskin BSW	in situ	sterivex	Shallow seawater	keep	Niskin10
+NA108087STEP	SUPR Filter Candelabra	in situ	SUPR	Candelabra Vent	old	S2
+NA108087STEP20200226	SUPR Filter Candelabra	in situ	SUPR	Candelabra Vent	keep	S2
+NA108089STEP	SUPR BAG Candelabra	in situ	SUPR	Candelabra Vent	keep	S7
+NA108096STEP	Niskin Plume Mt. Edwards	in situ	sterivex	Mt Edwards Plume	keep	Niskin7-12
+NA108100STEP	SUPR BAG Octopus Springs	in situ	SUPR	Octopus Springs Vent	keep	S9
+NA108102STEP	SUPR Filter BSW	in situ	SUPR	Deep seawater	keep	S6
+NA108106STEP	SUPR Filter Sir Vents-A-Lot	in situ	SUPR	SirVentsAlot Vent	keep	S10
+NA108108STEP	SUPR BAG Sir Vents-A-Lot	in situ	SUPR	SirVentsAlot Vent	keep	S12
+NA108109STEP	SUPR BAG Sir Vents-A-Lot	in situ	SUPR	SirVentsAlot Vent	keep	S13

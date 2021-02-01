@@ -1,0 +1,2763 @@
+---
+title: "GR-data-analysis-SKH"
+author: "Sarah Hu"
+date: "01/02/2021"
+output: 
+  html_document:
+    number_sections: true
+    theme: spacelab
+    highlight: monochrome
+    collapsed: false
+    toc: true
+    toc_depth: 3
+    toc_float: true
+  pdf_document:
+    toc: true
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, tidy = TRUE)
+```
+# Overview
+Hu et al. _in prep_. **Protistan grazing impacts microbial communities and carbon cycling at deep-sea hydrothermal vents**
+
+Code for all data analysis and figure generation, including grazing experiment analysis and sequence data processing. 
+* Import raw counts from FLP disappearance experiments
+* Perform calculations to estimate grazing pressure
+* Generate figures to visualize grazing pressure
+* Import and quality control 18S and 16S tag-sequencing data
+* Taxonomy curation
+* Statistical analyses
+* Figure generation
+
+# Set up working R environment
+The following analysis was performed in **R version 3.6.1**. All input files are available on the [Gorda Ridge GitHub ](https://github.com/shu251/protist-gordaridge-2021). 
+
+```{r Load libraries, message=FALSE}
+library(tidyverse);library(reshape2);library(cowplot)
+library(phyloseq);library(decontam)
+```
+
+# Import grazing experiment results & quality control
+```{r Import grazing data and metadata}
+# Metadata for each grazing experiment
+### Including dive ID, vent/site name, incubation parameters
+exp_list <- read.table("data-input/Table1_grazingexp_list.txt",header=T, fill=T, sep="\t")
+# head(exp_list)
+
+# Import all cell count information from FLP disappearance experiments
+counts <- read.csv("data-input/GordaRidge-cell-count-results.csv")
+counts_df <- counts %>%
+    separate(Site, c("SampleOrigin", "SampleNumber", "Stain"), "-", remove = FALSE) %>%
+    separate(ID, c("TimePoint", "Bottle", "Replicate"), "-", remove = FALSE) %>%
+    add_column(excess = "NA108") %>% 
+    unite(Sample.ID, excess, SampleNumber, sep = "-") %>% 
+    data.frame
+# head(counts_df[1:3,])
+
+# Import prok counts
+prok<-read.table("data-input/prok_counts.txt",header=T, fill=T, sep="\t"); head(prok[1:2,])
+```
+
+
+Sample Plume003, is more appropriately considered near vent bottom water. Modify sample name and entry below.
+```{r Update sample name schematic - grazing, echo=FALSE, message=FALSE}
+# head(exp_IDs)
+exp_IDs_mod <- exp_list %>% 
+  type.convert(as.is = TRUE) %>% 
+  mutate(Vent.name = case_when(
+    Sample.ID == "NA108-001" ~ "Near vent BW",
+    TRUE ~ `Vent.name`),
+    Sample.Location = case_when(
+      Sample.ID == "NA108-001" ~ "BW",
+      TRUE ~ `Sample.Location`)) %>% 
+  mutate(Vent.name = case_when(
+    Sample.Location == "Plume" ~ "Plume",
+    TRUE ~ Vent.name))
+
+counts_df_mod <- counts_df %>% 
+  mutate(SampleOrigin = case_when(
+    Sample.ID == "NA108-001" ~ "BW",
+    TRUE ~ SampleOrigin)) %>% 
+  select(-Site)
+
+prok_mod <- prok %>% 
+  type.convert(as.is = TRUE) %>% 
+  mutate(Vent.name = case_when(
+    Specific_Site == "Plume001" ~ "Near vent BW",
+    TRUE ~ `Vent.name`),
+    Sample.location = case_when(
+      Specific_Site == "Plume001" ~ "BW",
+      TRUE ~ `Sample.location`)) %>% 
+  mutate(Specific_Site = case_when(
+    Sample.location == "Plume" ~ "Plume",
+    TRUE ~ Specific_Site),
+    Vent.name = case_when(
+    Sample.location == "Plume" ~ "Plume",
+    TRUE ~ `Vent.name`))
+```
+
+```{r Join count data with experiment information}
+# Join count data with experiment IDs so each vent site can be identified by name:
+counts_df_ids <- counts_df_mod %>%
+    left_join(exp_IDs_mod, by = c("SampleOrigin" = "Sample.Location", "Sample.ID" = "Sample.ID")) %>%
+    unite(Sample, TimePoint, Bottle, sep = "_", remove = FALSE) %>%
+    data.frame
+## View combined table
+# head(counts_df_ids) 
+```
+
+## Calculate error rate
+Counts from Vent sample 110 T0 control were repeated three times (3 separate slides). Results are used below as technical replicates to estimate the percentage error rate.
+
+> By determining error rate from microscopy counting we can be more confident in evaluating true differences in values. 
+
+```{r Determine error rate}
+# Need to determine error rate across technical replicates. 
+## Prepped a single sample 3 times (3 different days); this was counted separately to to estimate a personal error rate
+# This is the % max and min that we will consider to be a margin of error
+tech_check <- counts_df_ids %>%
+    filter(Sample.ID %in% "NA108-110" & 
+             TimePoint %in% "T0" & 
+             Bottle %in% "Ctrl" & 
+             !(Replicate %in% "R2")) %>%
+    group_by(SampleOrigin, Sample.ID) %>%
+    summarise(MEAN = mean(Cellsperml), STDEV = sd(Cellsperml), ERR_PER = (100*(STDEV/MEAN))) %>%
+    data.frame
+
+# head(tech_check)
+PERCENT_ERR <- tech_check[["ERR_PER"]]; PERCENT_ERR # Change in FLP time point to time point must exceed 16%
+```
+
+## Estimate average cells/ml
+Get average FLP concentration from T0 experiments and average cells/ml from proj counts
+```{r Average across replicates}
+calc_FLP_avg <- counts_df_ids %>%
+    group_by(SampleOrigin, Sample.ID, T, Bottle, Vent.name, Sample, Stain, T1, T2) %>%
+    summarise(Avg_cellmL = mean(Cellsperml), # Average cells per ml across replicates
+              sem=sd(Cellsperml)/sqrt(length(Cellsperml)), # Standard mean error
+              SD=sd(Cellsperml),  #standard deviation
+              var=sqrt(SD),  # variance
+              Num = n()) %>% #Total number of 
+    data.frame
+# head(calc_FLP_avg)
+```
+
+```{r Extract t0}
+# Separate T0 from other time points to calculate % differences in DTAF counts from T0 to T1 and T0 to T2
+t0 <- filter(calc_FLP_avg, (T == "T0" & Stain == "DTAF")) %>%
+    select(-T1, -T2, -Stain, -Num, -T, -Sample, -SD, -var, Avg_cellmL_T0 = Avg_cellmL, sem_T0 = sem) %>%
+    data.frame
+# head(t0)
+
+# Isolate non-T0 time points
+t_ex <- filter(calc_FLP_avg, (!(T == "T0") & Stain == "DTAF")) %>%
+    select(-Stain, -Num, -Sample, -SD, -var) %>%
+    pivot_wider(names_from = T, values_from = c(Avg_cellmL, sem)) %>%
+    data.frame
+# head(t_ex)
+# ?pivot_wider
+
+bac_exp <- calc_FLP_avg %>%
+    filter(Stain %in% "DAPI") %>%
+    select(-Bottle, -Stain, -T1, -T2, -SD, -var, -Num, bac_cellmL = Avg_cellmL, bac_sem = sem) %>%
+    unite(SAMPLE, SampleOrigin, Vent.name, sep = "-", remove = FALSE) %>%
+    data.frame
+# head(bac_exp)
+dapi<-as.character(unique(bac_exp$SAMPLE))
+# dapi
+
+prok_avg <- prok_mod %>%
+    group_by(Sample.location, Vent.name) %>%
+    summarise(prok_avg = mean(Prok_count)) %>%
+    unite(SAMPLE, Sample.location, Vent.name, sep = "-", remove = FALSE) %>%
+    data.frame
+# prok_avg
+
+# Created:
+# t0, t_ex, bac_exp, prok_avg
+colnames(t0)
+```
+
+```{r Percent difference from T0 and timepoints, echo=FALSE, message=FALSE}
+# Calculate percent difference between T0 and T1, and T1 and T2
+flp_exp_summary <- t0 %>%
+    left_join(t_ex) %>%
+    unite(SAMPLE, SampleOrigin, Vent.name, sep = "-", remove = FALSE) %>%
+    left_join(prok_avg) %>%
+    mutate(T0_T1_PercDiff = 100*(abs(Avg_cellmL_T1-Avg_cellmL_T0)/Avg_cellmL_T0),
+          T0_T2_PercDiff = 100*(abs(Avg_cellmL_T2-Avg_cellmL_T0)/Avg_cellmL_T0)) %>%
+    data.frame
+# head(flp_exp_summary)
+```
+
+
+### Find significant differences
+
+Above data frame created lists the T0 FLP concentration and the T1 and T2 separately. The difference between T0 and T1 or T0 and T2 must exceed the percent error rate to be considered a reliable difference. 
+
+```{r Report percent error}
+# Prep data frame to look at loss of FLP over time for all time points
+## Compare to those that exceed error rate
+PERCENT_ERR
+```
+
+```{r Extract significant time points}
+cells_long <- flp_exp_summary %>%
+    select(SAMPLE, Bottle, Vent.name, Avg_cellmL_T0, Avg_cellmL_T1, Avg_cellmL_T2, T1, T2) %>%
+    pivot_longer(cols = starts_with("Avg_cellmL"), names_to = "CountID", values_to = "cellmL") %>%
+    separate(CountID, c("avg", "excess", "Tx"), sep = "_", remove = FALSE) %>%
+    select(-avg, -excess) %>%
+    data.frame
+
+sem_long <- flp_exp_summary %>%
+    select(SAMPLE, Bottle, Vent.name, sem_T0, sem_T1, sem_T2) %>%
+    pivot_longer(cols = starts_with("sem"), names_to = "semID", values_to = "sem") %>%
+    separate(semID, c("excess", "Tx"), sep = "_", remove = FALSE) %>%
+    select(-excess) %>%
+    data.frame
+
+# head(cells_long); head(sem_long)
+
+# Combine and fix Timepoint
+flp_long_toplot <- cells_long %>%
+    left_join(sem_long) %>%
+    select(-semID) %>%
+    add_column(Hrs = 0) %>%
+    mutate(Hrs = case_when(
+        Tx == "T1" ~ T1,
+        Tx == "T2" ~ T2,
+        TRUE ~ (as.integer(.$Hrs)))) %>%
+    select(-T1, -T2) %>%
+    data.frame
+
+# head(flp_long_toplot)
+```
+
+```{r Plot average cells/ml with error range}
+## Plot average cells/ml for each experiment
+
+# Factor for plotting
+sample_order <- c("Near vent BW","Mt Edwards","Venti latte","Candelabra","SirVentsalot")
+sample_label <- c("Near vent BW","Mt. Edwards","Venti latte","Candelabra","Sir Ventsalot")
+sample_color <-c("#6f88af","#61ac86","#711518","#dfa837","#ce536b")
+flp_long_toplot$SAMPLE_ORDER <- factor(flp_long_toplot$Vent.name, levels = (sample_order), labels = sample_label)
+names(sample_color) <- sample_label
+bottle_order <- c("Ctrl", "Exp")
+flp_long_toplot$BOTTLE <- factor(flp_long_toplot$Bottle, levels = bottle_order, labels = c("Control", "Experimental"))
+```
+
+```{r Generate plot, fig.width=7, fig.height=6}
+# svg("figs/Supplementary-FLP-CTRL-PercError-plot.svg", w = 7, h = 6)
+ggplot(flp_long_toplot, aes(x = Hrs, y = cellmL, fill = SAMPLE_ORDER)) +
+    geom_rect(data = (subset(flp_long_toplot, Tx %in% "T0")), aes(xmin=0, xmax=40, 
+            ymin=(cellmL - ((PERCENT_ERR/100)*cellmL)), 
+            ymax=(cellmL + ((PERCENT_ERR/100)*cellmL))), color=NA,alpha=0.3) +
+    geom_line(stat = "identity", linetype = 1, aes(group = SAMPLE)) +
+    geom_errorbar(aes(ymin = (cellmL - sem), ymax = (cellmL + sem)), width = 0.1) +
+    geom_point(stat = "identity", size = 3, color = "black", aes(fill = SAMPLE_ORDER, shape = SAMPLE_ORDER)) +
+    scale_y_log10() +
+    scale_fill_manual(values = sample_color) +
+    scale_shape_manual(values = c(23,21,21,21,21)) +
+    labs(y = bquote("FLP cells "~mL^-1), x = "Incubation hours") +
+    facet_grid(SAMPLE_ORDER~BOTTLE, scales = "free") +
+    theme_bw() + 
+    theme(panel.grid.minor = element_blank(),
+          legend.title = element_blank(),
+          strip.text.x = element_text(face = "bold", color = "black", hjust = 0, size = 10),
+          strip.text.y = element_text(size = 10),
+          strip.background = element_blank(),
+          panel.background = element_blank(), 
+          panel.border = element_blank(),
+          axis.line = element_line(colour = "black"),
+          axis.text = element_text(color = "black", size = 9))
+# dev.off()
+```
+
+## Refine FLP count results
+Subset FLP results to select time points with significant loss in FLP/
+
+```{r Subset}
+# Subset Experiment results and filter for those that exceed the percent error
+flp_sig <- flp_exp_summary %>%
+    filter(Bottle %in% "Exp") %>%
+    select(-T1, -T2) %>%
+    mutate(T1_sig = case_when(
+        T0_T1_PercDiff > PERCENT_ERR ~ "exceeds"),
+           T2_sig = case_when(T0_T2_PercDiff > PERCENT_ERR ~ "exceeds")
+          ) %>%
+    data.frame
+
+# head(flp_sig)
+
+# Select experiments that T1 exceeds percent difference
+T1_tmp <- flp_sig %>%
+    filter(T1_sig == "exceeds") %>%
+    select(SAMPLE) %>%
+    data.frame
+T1_tmp$Tx = "T1"
+T1_tmp$Keep = "yes"
+
+# Select experiments that T1 was NA, but T2 was significant
+T2_tmp <- flp_sig %>%
+    filter(is.na(T1_sig) & T2_sig == "exceeds") %>%
+    select(SAMPLE) %>%
+    data.frame
+T2_tmp$Tx = "T2"
+T2_tmp$Keep = "yes"
+
+keep_status <- rbind(T1_tmp, T2_tmp); #keep_status
+# # KEPT:
+# # near vent point T2, Candelabra T2
+# # Mt Edwards time point T1, Sirventsalot T1, & venti latte T1
+```
+
+```{r Join significant experiments, echo=FALSE, message=FALSE}
+# Join experiments that are significant and filter data to keep.
+t <- c("T1", "T2")
+flp_trend_sig <- flp_long_toplot %>%
+    filter(Bottle == "Exp") %>%
+    left_join(keep_status) %>%
+    filter(Tx == "T0" | (Tx %in% t & Keep == "yes")) %>%
+    separate(SAMPLE, c("SampleOrigin", "excess"), sep = "-", remove = FALSE) %>%
+    select(-Keep, -excess) %>%
+    data.frame
+# flp_trend_sig
+```
+
+> These values are used for all downstream grazing rate calculations, as the loss in FLP was found to exceed the microscopy count error percentage.
+
+```{r Plot significant FLP loss, fig.width=5, fig.height=3}
+# Factor for plotting
+## use characterise lists from above
+flp_trend_sig$SAMPLE_ORDER <- factor(flp_trend_sig$Vent.name, levels = (sample_order), labels = sample_label)
+
+plot_graze_trends <- ggplot(flp_trend_sig, 
+                            aes(x = Hrs, y = cellmL, fill = SAMPLE_ORDER, shape = SampleOrigin)) +
+    geom_line(stat="identity", aes(group = SAMPLE_ORDER, linetype = SampleOrigin)) +
+    geom_errorbar(aes(ymin = (cellmL-sem), ymax = (cellmL+sem)), size = 0.5, width = 0.1)+
+    geom_point(stat="identity", size=3, color="black") +
+    scale_linetype_manual(values = c(1, 1))+
+    scale_fill_manual(values = sample_color)+
+    scale_shape_manual(values = c(23,21))+
+    scale_y_log10(limits = c(5e3,1e5))+
+    labs(y = bquote("FLP cells "~mL^-1), x = "Incubation hours")+
+    theme_minimal()+
+    theme(panel.grid.major = element_line(), panel.grid.minor = element_blank(),
+           panel.background = element_blank(), axis.line = element_line(colour = "black"), 
+           axis.text=element_text(color="black"),
+           legend.title = element_blank()) +
+    guides(fill = guide_legend(override.aes = list(shape = c(23,21,21,21,21))),
+       shape = guide_legend(override.aes = list(fill = "black"))) +
+    annotation_logticks(sides = "l")
+# plot_graze_trends
+```
+
+> Consistent loss in FLP over time
+
+```{r Change time point label structure, as each experiments lists T0 or TF, echo=FALSE, message=FALSE}
+processed_data <- flp_trend_sig %>%
+    type.convert(as.is = TRUE) %>%
+    mutate(TimePoint = case_when(Tx == "T0" ~ "T0",
+                                Tx != "T0" ~ "Tf")) %>%
+    select(-Tx, -CountID) %>%
+    pivot_wider(names_from = TimePoint, values_from = c(cellmL, sem, Hrs)) %>%
+    select(-Hrs_T0) %>%
+    left_join(prok_avg) %>%
+    data.frame
+# processed_data
+# View(processed_data)
+```
+
+## Calculate mortality and grazing rate
+Grazing rate calculation from Connell et al. 2017
+mortality factor = ln(Tf/T0) * (-1/t)
+t = incubation hours reported as days
+Tf = number of FLP at end of experiment
+T0 = number of FLP at beginning of experiment
+The natural log in R is 'log()'
+
+```{r Grazing rate calculation}
+# cellmL = prokaryote average cells per ml
+graze_rate <- processed_data %>%
+    # type.convert(as.is = TRUE) %>%
+    group_by(SAMPLE, SampleOrigin, Vent.name, Hrs_Tf, SAMPLE_ORDER) %>%
+    mutate(
+        # Calculate mortality factor (m)
+          MORTALITY = (log(cellmL_Tf/cellmL_T0))*(-1/(Hrs_Tf/24)),
+           MORTALITY_min = (log((cellmL_Tf-sem_Tf)/(cellmL_T0-sem_T0)))*(-1/(Hrs_Tf/24)),
+           MORTALITY_max = (log((cellmL_Tf+sem_Tf)/(cellmL_T0+sem_T0)))*(-1/(Hrs_Tf/24)),
+           # Calculate model I G - Rate over given amount of time
+           G = ((cellmL_T0 - cellmL_Tf) * (prok_avg / cellmL_T0)),
+           G_min = (((cellmL_T0-sem_T0) - (cellmL_Tf-sem_Tf)) * (prok_avg / (cellmL_T0-sem_T0))),
+           G_max = (((cellmL_T0+sem_T0) - (cellmL_Tf+sem_Tf)) * (prok_avg / (cellmL_T0+sem_T0))),
+           # Calculate Grazing per hour
+           GrazingRate_hr = (G/Hrs_Tf), 
+           GrazingRate_hr_min = (G_min/Hrs_Tf),
+           GrazingRate_hr_max = (G_max/Hrs_Tf),
+           # Estimate prokaryote turnover % per day
+           Prok_turnover = (100*(G / prok_avg)), #Convert to per day (*24)
+           Prok_turnover_min = (100*(G_min / prok_avg)),
+           Prok_turnover_max = (100*(G_max / prok_avg)),
+           # Prok_turnover = (100*((rate * cellmL)/cellmL)), #ARCHIVE
+           # Prok_turnover_min = (100*((rate_min * cellmL)/cellmL)), #ARCHIVE
+           # Prok_turnover_max = (100*((rate_max * cellmL)/cellmL)) #ARCHIVE
+           # Model II
+           N_avg = ((prok_avg + prok_avg)/2),
+           F_avg = ((cellmL_T0 + cellmL_Tf)/2),
+           q = ((cellmL_T0 - cellmL_Tf)/F_avg),
+           # G_II a and b should be equivalent
+           G_II_a = q * (N_avg),
+           G_II_b = ((cellmL_T0 - cellmL_Tf) * ((prok_avg+prok_avg)/(cellmL_T0+cellmL_Tf))),
+           GrazingRate_hr_II = (G_II_a/Hrs_Tf)
+           ) %>%
+        data.frame
+# graze_rate
+```
+
+```{r Plot grazing rate, fig.width=4, fig.height=3}
+# Factor for plotting
+sample_order <- c("Near vent BW","Mt Edwards","Venti latte","Candelabra","SirVentsalot")
+sample_label <- c("Near vent BW","Mt. Edwards","Venti latte","Candelabra","Sir Ventsalot")
+sample_color <-c("#6f88af","#61ac86","#711518","#dfa837","#ce536b")
+
+graze_rate$SAMPLE_ORDER <- factor(graze_rate$Vent.name, levels = (sample_order), labels = (sample_label))
+
+mortality <- ggplot(graze_rate, aes(y = SAMPLE_ORDER, x = GrazingRate_hr, fill = SAMPLE_ORDER, shape = SampleOrigin)) +
+geom_errorbar(aes(xmin = GrazingRate_hr_min, xmax = GrazingRate_hr_max), size = 0.5, width = 0.1) +
+    geom_point(stat = "identity", size = 3, color = "black", aes(shape = SampleOrigin)) +
+    scale_fill_manual(values = (sample_color)) +
+    scale_shape_manual(values = c(23,21)) +
+    coord_flip() +
+    labs(y = "", x = bquote("Cells "~mL^-1 ~hr^-1)) +
+    theme_minimal() +
+    theme(panel.grid.major = element_line(), panel.grid.minor = element_blank(),
+           panel.background = element_blank(), axis.line = element_line(colour = "black"), 
+           axis.text.x = element_text(color="black", angle = 45, hjust = 1, vjust = 1), 
+          axis.ticks = element_line(),
+          axis.text.y = element_text(color="black"),
+           legend.position = "none", strip.text =element_blank())
+
+# mortality
+```
+
+```{r Plot percentage turnover, fig.width=4, fig.height=3}
+bar_plot <- ggplot(graze_rate, aes(x = SAMPLE_ORDER, y = Prok_turnover)) +
+    geom_bar(stat = "identity", position = "stack", width = 0.6, aes(fill = SAMPLE_ORDER)) +
+    geom_errorbar(aes(ymin = Prok_turnover_min, ymax = Prok_turnover_max), size = 0.5, width = 0.1) +
+   scale_fill_manual(values = (sample_color)) +
+    scale_y_continuous(expand = c(0,0), limits = c(0,100)) +
+    labs(x = "", y = bquote("Prokaryote turnover %"~d^-1)) +
+    # coord_flip() +
+    theme_minimal() +
+    theme(panel.grid.major = element_line(), panel.grid.minor = element_blank(),
+           panel.background = element_blank(), axis.line = element_line(colour = "black"), 
+           axis.text.y=element_text(color="black"), axis.ticks = element_line(),
+          axis.text.x = element_text(color="black", angle = 45, hjust = 1, vjust = 1),
+           legend.position = "none", strip.text =element_blank())
+bar_plot
+```
+
+### Final figure generation
+
+```{r Generate panel plot, fig.width=3, fig.height=7}
+# svg("figs/Grazing-results-panel-VERT-15-01-2021.svg", h = 7, w = 3)
+plot_grid(plot_graze_trends + theme(legend.position = "none"),
+          # mortality,
+          # bar_plot,
+          mortality + theme(axis.text.x = element_blank()),
+          bar_plot + theme(axis.text.x = element_blank()),
+          axis = c("lrtb"), align = c("hv"), labels = c("a", "b", "c"), nrow = 3, ncol = 1)
+# dev.off()
+```
+
+## Estimated carbon calculations
+```{r Calculate carbon biomass}
+# Replace with the calcs to place into context with McNichol et al. work
+# head(graze_rate)
+# G = number of cells grazed during experiment duration
+graze_rate_wCarbon <- graze_rate %>%
+  add_column(fgC_cell_morono = 86) %>% # Add in Morono et al. 2011 value
+  add_column(fgC_cell_mcnic = 173) %>% 
+  mutate(
+    cells_consumed_perday = (G / (Hrs_Tf /24)), # Rate of cells consumed * in situ prok, per day (day = hours of incubation reported in days)
+    fgC_ml_perday_morono = (cells_consumed_perday * fgC_cell_morono),
+    fgC_ml_perday_mcnic = (cells_consumed_perday * fgC_cell_mcnic),# Convert cell amount to fg C
+    ugC_L_perday_morono = (fgC_ml_perday_morono * (1e-09) * 1000), # Convert to ug C per L
+    ugC_L_perday_mcnic = (fgC_ml_perday_mcnic * (1e-09) * 1000),
+    lower_mcnichol_morono = 100*(ugC_L_perday_morono / 17.3),
+    upper_mcnichol_morono = 100*(ugC_L_perday_morono / 321.4),
+    lower_mcnichol_mcnic = 100*(ugC_L_perday_mcnic / 17.3),
+    upper_mcnichol_mcnic = 100*(ugC_L_perday_mcnic / 321.4)
+  ) %>% 
+  data.frame
+# View(graze_rate_wCarbon)
+# write_delim(graze_rate_wCarbon, path = "Grazing-calc-wCarbon-results.txt", delim = "\t")
+```
+
+
+# Import 18S ASV table & quality control
+
+Set up working R environment and import 18S ASV table. Modify input tables and import as phyloseq objects in order to perform quality control removal of contaminant ASVs (_decontam_).
+
+```{r Import and set up env, message=FALSE, warning=FALSE}
+load("data-input/GR-ASVtables-updatedTax.RData", verbose = TRUE)
+```
+
+
+## Clean ASV table with 'decontam'
+
+Import ASV table as phyloseq object, note control samples.
+
+
+```{r extract taxonomic info, warning=FALSE}
+taxmat <- GR_tagseq_wideformat %>% 
+  select(Feature.ID, Taxon_updated) %>% 
+  separate(Taxon_updated, c("Kingdom","Supergroup","Division","Class","Order","Family","Genus","Species"), sep = ";", remove = FALSE) %>% 
+  column_to_rownames(var = "Feature.ID") %>% 
+  as.matrix
+# class(taxmat)
+# head(taxmat)
+```
+Note that Axial ID originates from a laboratory blank sample that was exactrated at the same time.
+```{r extract ASV count information}
+asvmat <- GR_tagseq_wideformat %>% 
+  select(Feature.ID, starts_with(c("Gorda", "Axial"))) %>% 
+  column_to_rownames(var = "Feature.ID") %>% 
+  as.matrix
+```
+
+Import metadata below and combine with phyloseq object.
+```{r Import as phyloseq object, message=FALSE, echo=FALSE, warning=FALSE}
+row.names(taxmat)<-row.names(asvmat)
+# class(asvmat);class(taxmat)
+
+ASV = otu_table(asvmat, taxa_are_rows = TRUE) #phyloseq command
+TAX = tax_table(taxmat)
+physeq <- phyloseq(ASV, TAX)
+# physeq #Phyloseq object
+
+# Include additional sample names
+samplenames <- as.data.frame(colnames(asvmat))
+# samplenames; head(asvtab)
+colnames(samplenames)[1]<-"SAMPLE"
+
+# Import metadata
+ventnames <- read.delim("data-input/ventnames-gordaridge.txt")
+# names(ventnames);head(ventnames)
+# View(ventnames)
+colnames(ventnames)[1]<-"SAMPLE"
+head(ventnames)
+#
+samplenames_1 <- left_join(samplenames, ventnames)
+row.names(samplenames_1)<-sample_names(physeq) 
+samplenames_1 <- samplenames_1 %>% unite(LocationName_Sampletype, LocationName, Sampletype, sep = " ", remove = FALSE)
+# Convert to phyloseq object
+sampledata <- sample_data(samplenames_1)
+# Merge with other data
+physeq_names = merge_phyloseq(physeq, sampledata)
+# physeq_names
+# sample_data(physeq_names)
+```
+
+## Identify contaminant ASVs
+_Decontam_ will identify putative contaminate ASVs based on the difference in prevalence between control blank and environmental samples. First review the library size or number of sequences within each sample to see how varied the control samples are to the experimental samples.
+```{r check library size, fig.height=3, fig.width=5}
+# Decontam:
+physeq_names
+# Check out library size of my data
+df <- as.data.frame(sample_data(physeq_names))
+df$LibrarySize <- sample_sums(physeq_names)
+df <- df[order(df$LibrarySize),]
+df$Index <- seq(nrow(df))
+#
+ggplot(data=df, aes(x=Index, y=LibrarySize, fill=Sample_or_Control, shape=LOCATION)) + 
+  geom_point(color="black", size=3, aes(shape=LOCATION)) +
+  scale_shape_manual(values = c(21,22,23)) +
+  theme_bw()
+```
+> Shows that out of the 3 ship blanks I have, one of the sames has a pretty large library size, otherwise, control samples have very small library sizes.
+
+
+```{r ID contaminants}
+# Assign negative control designation
+sample_data(physeq_names)$is.neg <- sample_data(physeq_names)$Sample_or_Control == "Control Sample"
+
+# ID contaminants using Prevalence information
+contamdf.prev <- isContaminant(physeq_names, method="prevalence", neg="is.neg", threshold = 0.5, normalize = TRUE) 
+table(contamdf.prev$contaminant) # Report number of ASVs IDed as contamintants
+```
+> 0.5 - this threshold will ID contaminants in all samples that are more prevalent in negative controls than in positive samples. In this study, control samples included 1 lab-based blank and 3 ship-board blanks taken at the time of field study. Results showed 34 ASVs to be considered "contaminants"
+
+```{r incorporate contaminant info into phyloseq}
+# Make phyloseq object of presence-absence in negative controls and true samples
+## change to presence absence
+gr.pa <- transform_sample_counts(physeq_names, function(abund) 1*(abund>0))
+
+# isolate PA of positive and negative samples
+gr.pa.neg <- prune_samples(sample_data(gr.pa)$Sample_or_Control == "Control Sample", gr.pa)
+gr.pa.pos <- prune_samples(sample_data(gr.pa)$Sample_or_Control == "True Sample", gr.pa)
+```
+
+## Remove contaminant ASVs from data
+```{r rm contaminants from ASV, message=FALSE, warning=FALSE}
+# Subset TRUE contaminants
+contams <- subset(contamdf.prev, contaminant == "TRUE")
+contams$Feature.ID <- row.names(contams)
+# head(contams);dim(contams)
+list_of_contams <- as.character(contams$Feature.ID)
+#
+# Explore taxa IDed as contaminants
+taxa_list <- as.data.frame(taxmat)
+taxa_list$Feature.ID <- row.names(taxa_list)
+
+taxa_contams <- left_join(contams, taxa_list)
+# write_delim(taxa_contams, path = "List-of-contaminant-ASVs.txt", delim = "\t")
+
+# Plot total sequences and which are contaminants
+# Remove contaminant and count sequence sums per sample to see which samples had the highest number of contamiant sequences removed.
+# After remove contaminants, what % of sequences is removed?
+# head(GR_tagseq_counts[1:2,])
+GR_tagseq_longformat$CONTAM <- "Pass"
+# head(contams[1:2,])
+# str(list_of_contams)
+GR_tagseq_longformat$CONTAM[GR_tagseq_longformat$Feature.ID %in% list_of_contams] = "Fail"
+# head(GR_tagseq_counts[1:2,])
+
+# Make character list of all feature.ids to KEEP:
+keep1<- subset(GR_tagseq_longformat, CONTAM %in% "Pass")
+# length(unique(keep1$Feature.ID))
+keep_asvs <- as.character(unique(keep1$Feature.ID)) #see below
+#
+passfail <- GR_tagseq_longformat %>%
+  group_by(SAMPLE, CONTAM) %>%
+  summarise(SUM_CONTAM = sum(COUNT)) %>%
+  data.frame
+```
+
+## Report sequence stats
+```{r decontam, message=FALSE, warning=FALSE}
+passfail_wID <- left_join(passfail, ventnames, by = "SAMPLE")
+
+```
+
+```{r total sequences originally}
+# Original number of reads
+sum(GR_tagseq_longformat$COUNT)
+# Original number of ASVs
+length(unique(GR_tagseq_longformat$Feature.ID))
+```
+
+```{r Remove all the control samples}
+# unique(GR_tagseq_counts$SAMPLEID)
+GR_tagseq_counts_noCTRL <- subset(GR_tagseq_longformat, !(SAMPLEID %in% "CTRL"))
+# New total number of sequences
+sum(GR_tagseq_counts_noCTRL$COUNT)
+```
+
+```{r Remove contaminants}
+counts_decont <- subset(GR_tagseq_longformat, !(Feature.ID %in% list_of_contams))
+length(unique(counts_decont$Feature.ID)) - length(unique(GR_tagseq_longformat$Feature.ID)) # Confirm 34 lines removed
+```
+
+```{r Percent of sequences removed after decontam}
+# % of sequences was removed following decontam; this is counting the ship blank samples themselves
+100*(1-(sum(counts_decont$COUNT)/sum(GR_tagseq_counts_noCTRL$COUNT)))
+# head(counts_decont)
+```
+
+```{r Report removal of sequences by sample, warning=FALSE, message=FALSE}
+# Breakdown by samples:
+passfail_wide <- dcast(passfail, SAMPLE ~ CONTAM)
+passfail_wide$PercLossSeq <- paste(100*(passfail_wide$Fail/(passfail_wide$Fail+passfail_wide$Pass)))
+# dim(passfail_wide)
+# write.csv(passfail_wide, file="PercSeqLost-decontam.csv")
+# breakdown by sample - reports % lost per sample
+
+# Remove contaminant sequences from phyloseq object:
+# Subset TRUE contaminants
+# ?prune_taxa
+# class(keep_asvs)
+physeq_tmp <- prune_taxa(keep_asvs, physeq_names)
+# sample_data(physeq_tmp)
+
+# Remove one sample with too few sequences
+physeq_clean <- subset_samples(physeq_tmp, sample_names(physeq_tmp) !="GordaRidge_BSW020_sterivex_2019_REPa")
+# sample_data(physeq_clean)
+# physeq_clean
+# Remove control samples from data frame
+tmp <- subset(GR_tagseq_longformat, !(SAMPLEID %in% "CTRL")) # Remove controls, get list of sample names that are controls
+samples_keep <- as.character(unique(tmp$SAMPLE))
+physeq_clean_true <- prune_samples(samples_keep, physeq_clean)
+```
+
+## Save output
+```{r Save output}
+# Save as R Data
+# save(counts_decont, file="data-input/GR-ASV-table-clean.RData")
+```
+
+# Plot high level taxonomy of protists _in situ_
+
+Import cleaned ASV data, curate taxonomic assignments specific to protists, create bar plot to demonstrate protistan diversity at Gorda Ridge.
+
+```{r import and format dataframe, message=FALSE, warning=FALSE}
+load("data-input/GR-ASV-table-clean.RData", verbose=TRUE) # after decontam clenaing
+gr_counts <- counts_decont %>% 
+  filter(COUNT > 0) %>% 
+  separate(Taxon_updated, c("Kingdom","Supergroup","Division","Class","Order","Family","Genus","Species"), sep = ";", remove = FALSE) %>% 
+  data.frame
+# head(gr_counts)
+tax_only_tmp <- gr_counts %>% 
+  select(Taxon_updated, Kingdom,Supergroup,Division,Class,Order,Family,Genus,Species) %>% 
+  distinct() %>% 
+  data.frame
+```
+
+```{r Import metadata for sample names & Join, message=FALSE, warning=FALSE}
+ventnames <- read.delim("data-input/ventnames-gordaridge.txt")
+colnames(ventnames)[1]<-"SAMPLE"
+
+# Join with dataframe
+gr_counts_name <- gr_counts %>% 
+  left_join(select(ventnames, SAMPLE, LOCATION_SPECIFIC, Sampletype, LocationName)) %>% 
+  data.frame
+
+gr_counts_name$LocationName[gr_counts_name$LOCATION == "Shipblank"]="Shipblank"
+```
+
+## Taxonomy curation - PR2
+Function below **pr2_curate()** is the custom manual curation of the taxonomic assignments from the PR2 database. The function creates new columns with taxonomic information that summarizes the core groups in the dataset.
+
+```{r Revise and explore taxonomy assignment}
+pr2_curate <- function(df){
+  # Add a column
+  df$Taxa <-"Unassigned-Eukaryote"
+  df$Taxa[df$Supergroup == "Alveolata"]="Alveolata-Other"
+  df$Taxa[df$Division == "Ciliophora"]="Alveolata-Ciliates"
+  df$Taxa[df$Division == "Dinoflagellata"]="Alveolata-Dinoflagellates"
+  df$Taxa[df$Class == "Syndiniales"] = "Alveolata-Syndiniales"
+  df$Taxa[df$Class == "Apicomplexa"]="Alveolata-Apicomplexa"
+  df$Taxa[df$Supergroup == "Hacrobia"]="Hacrobia-Other"
+  df$Taxa[df$Division == "Cryptophyta"]="Hacrobia-Cryptophyta"
+  df$Taxa[df$Division == "Haptophyta"]="Hacrobia-Haptophyta"
+  df$Taxa[df$Supergroup == "Opisthokonta"]="Opisthokonta-Other"
+  df$Taxa[df$Division == "Fungi"]="Opisthokonta-Fungi"
+  df$Taxa[df$Division == "Metazoa"]="Opisthokonta-Metazoa"
+  df$Taxa[df$Supergroup == "Stramenopiles"]="Stramenopiles-Other"
+  df$Taxa[df$Class == "Bicoecea"]="Stramenopiles-Bicoecea"
+  df$Taxa[df$Division == "Ochrophyta"]="Stramenopiles-Ochrophyta"
+  mast <- unique(filter(df, grepl("MAST", Class)) %>% select(Class))
+  mast_list <- as.character(mast$Class)
+  df$Taxa[df$Class %in% mast_list]="Stramenopiles-MAST"
+  df$Taxa[df$Supergroup == "Archaeplastida"]="Archaeplastida-Other"
+  df$Taxa[df$Division == "Chlorophyta"]="Archaeplastida-Chlorophyta"
+  df$Taxa[df$Supergroup == "Excavata"]="Excavata"
+  df$Taxa[df$Supergroup == "Apusozoa"]="Apusozoa"
+  df$Taxa[df$Supergroup == "Amoebozoa"]="Amoebozoa"
+  df$Taxa[df$Supergroup == "Rhizaria"]="Rhizaria-Other"
+  df$Taxa[df$Division == "Cercozoa"]="Rhizaria-Cercozoa"
+  df$Taxa[df$Division == "Radiolaria"]="Rhizaria-Radiolaria"
+  return(df)
+}
+```
+Apply PR2 curation to 18S data.
+
+```{r Run taxonomy curation fxn}
+gr_counts_wtax <- pr2_curate(gr_counts_name)
+# head(gr_counts_wtax[1:3,])
+# unique(gr_counts_wtax$Taxa)
+```
+> Output is the full ASV table with added columns for curated taxonomy. Above also provides a list of the unique taxonomic names assigned.
+
+```{r remove control and blank samples}
+gr_counts_wtax_samplesonly <- subset(gr_counts_wtax, !(Sampletype == "control"))
+
+## To average across replicates, modify SUPR sample names
+gr_counts_filter <- gr_counts_wtax_samplesonly
+gr_counts_filter$SAMPLEID<- sub("SUPRS9", "SUPR", gr_counts_filter$SAMPLEID)
+gr_counts_filter$SAMPLEID<- sub("SUPRS11", "SUPR", gr_counts_filter$SAMPLEID)
+gr_counts_filter$SAMPLEID<- sub("SUPRS10", "SUPR", gr_counts_filter$SAMPLEID)
+gr_counts_filter$SAMPLEID<- sub("SUPRS2", "SUPR", gr_counts_filter$SAMPLEID)
+gr_counts_filter$SAMPLEID<- sub("SUPRS3", "SUPR", gr_counts_filter$SAMPLEID)
+gr_counts_filter$SAMPLEID<- sub("SUPRS1", "SUPR", gr_counts_filter$SAMPLEID)
+```
+
+
+### Report sequence stats after curation
+
+```{r Sum of all sequences}
+# Sum of all sequences
+a <- sum(gr_counts_filter %>% filter(!(SAMPLEID == "CTRL")) %>% select(COUNT)); a
+```
+
+```{r Total ASVs}
+# Total ASVs
+dim(unique(gr_counts_filter %>% filter(!(SAMPLEID == "CTRL")) %>% select(Feature.ID)))[1]
+```
+
+```{r Percent of all sequences Unassigned}
+# Percentage of all sequences Unassigned Eukaryote
+x <- sum(gr_counts_filter %>% filter(!(SAMPLEID == "CTRL")) %>% filter(Taxon_updated == "Eukaryota") %>% select(COUNT))
+100*(x/a)
+```
+
+```{r ASVs left Unassigned}
+# Total ASVs left "Unassigned-Eukaryote"
+dim(unique(gr_counts_filter %>% filter(!(SAMPLEID == "CTRL")) %>% filter(Taxon_updated == "Eukaryota") %>% select(Feature.ID)))[1]
+```
+
+```{r Percent of all sequences assigned Opisthokonts}
+# Percentage of all sequences assigned Opisthokonts
+x <- sum(gr_counts_filter %>% filter(!(SAMPLEID == "CTRL")) %>% filter(Supergroup == "Opisthokonta") %>% select(COUNT))
+100*(x/a)
+dim(unique(gr_counts_filter %>% filter(!(SAMPLEID == "CTRL")) %>% filter(Supergroup == "Opisthokonta") %>% select(Feature.ID)))[1]
+```
+
+## Prepare dataframe to for bar plot
+### Average ASV sequence count across replicate samples
+Average ASV sequence counts across replicate samples, ```COUNT_AVG``` column will now equal the ASV sequence count value across replicates
+```{r average ASV across replicates, message=FALSE, warning=FALSE}
+gr_counts_avg_wtax <- gr_counts_filter %>%
+    mutate(LocationName = case_when(
+      LOCATION_SPECIFIC == "Plume036" ~ "Candelabra Plume",
+      LOCATION_SPECIFIC == "Plume096" ~ "Mt Edwards Plume",
+      TRUE ~ as.character(LocationName)
+    )) %>% 
+  group_by(Feature.ID, SAMPLEID, Sampletype,  LOCATION_SPECIFIC, LocationName, Taxon_updated, Kingdom, Supergroup, Division, Class, Order, Family, Genus, Species, Taxa) %>%
+  summarise(COUNT_AVG = mean(COUNT)) %>%
+  as.data.frame
+# dim(gr_counts_filter);dim(gr_counts_avg_wtax)
+# tmp <- gr_counts_avg_wtax %>% select(Taxa, Taxon_updated, Kingdom, Supergroup, Division, Class, Order, Family, Genus, Species) %>% distinct() %>% data.frame
+# write_delim(tmp, path = "tax-tmp-2.txt", delim = "\t")
+# unique(gr_counts_avg_wtax$Taxa)
+# unique(gr_counts_avg_wtax$LocationName)
+```
+
+
+```{r Save 18S table with taxonomic curation and averages}
+# Save output and view
+# save(gr_counts_filter,gr_counts_wtax, gr_counts_avg_wtax, file="data-input/GordaRidge-ASVtable-avg.RData")
+```
+
+### Sum ASV sequence counts to taxonomic level
+
+```{r Import curated 18S table}
+# See above
+# load(file="data-input/GordaRidge-ASVtable-avg.RData", verbose = T)
+```
+
+Now sum ASV counts by curated taxonomic level. Below generates both summed sequences from samples averages across replicates and for samples with replicates.
+```{r Sum to curated taxa level, message=FALSE, warning=FALSE}
+# Sum averaged counts at curated taxa level
+gr_counts_avg_TAXA <- gr_counts_avg_wtax %>%
+    # Remove control samples & bsw with too few sequences
+    filter(!(Sampletype == "Control")) %>% 
+    filter(!(LOCATION_SPECIFIC == "BSW020")) %>% 
+    # sum by like taxa
+    group_by(SAMPLEID, Sampletype, LocationName, Taxa) %>% 
+    summarise(SUM = sum(COUNT_AVG)) %>% 
+    unite(SAMPLE, LocationName, Sampletype, SAMPLEID, sep = " ", remove = FALSE) %>% 
+    data.frame
+
+# Sum each replicate separately to curated taxa level
+gr_counts_wreps_TAXA <- gr_counts_filter %>%
+    mutate(LocationName = case_when(
+      LOCATION_SPECIFIC == "Plume036" ~ "Candelabra Plume",
+      LOCATION_SPECIFIC == "Plume096" ~ "Mt Edwards Plume",
+      TRUE ~ as.character(LocationName)
+    )) %>% 
+    # Remove control samples & bsw with too few sequences
+    filter(!(Sampletype == "Control")) %>% 
+    filter(!(LOCATION_SPECIFIC == "BSW020")) %>% 
+    # sum by like taxa
+    group_by(SAMPLEID, Sampletype, LocationName, LOCATION_SPECIFIC, Taxa) %>% 
+    summarise(SUM = sum(COUNT)) %>% 
+    mutate(locationspecific_mod = case_when(
+      LOCATION_SPECIFIC == "Plume001" ~ "NearVent001",
+      TRUE ~ as.character(LOCATION_SPECIFIC)
+    )) %>% 
+    unite(SAMPLE, LocationName, Sampletype, SAMPLEID, sep = " ", remove = FALSE) %>%
+    unite(SAMPLE_REPS, LocationName, Sampletype, SAMPLEID, locationspecific_mod, sep = " ", remove = FALSE) %>% 
+    data.frame
+# unique(gr_counts_wreps_TAXA$SAMPLE_REPS)
+```
+
+
+```{r Make supplementary tables, message=FALSE, warning=FALSE}
+sample_order_all<-c("Shallow seawater in situ sterivex","Deep seawater in situ sterivex", "Near vent BW in situ sterivex","Near vent BW Grazing T0","Near vent BW Grazing T24","Near vent BW Grazing T36","Mt Edwards Plume in situ sterivex","Mt Edwards Vent in situ SUPR","Mt Edwards Vent Grazing T0","Mt Edwards Vent Grazing T36","Venti Latte Vent in situ SUPR","Venti Latte Vent Grazing T0","Venti Latte Vent Grazing T36","Candelabra Plume in situ sterivex","Candelabra Vent in situ SUPR","Candelabra Vent Grazing T24","SirVentsAlot Vent in situ SUPR","SirVentsAlot Vent Grazing T24")
+
+supp_table_seq <- gr_counts_avg_TAXA %>%
+  select(SAMPLE, Taxa, SUM) %>% 
+  pivot_wider(names_from = SAMPLE, values_from = SUM, values_fill = 0) %>% 
+  arrange(Taxa) %>% 
+  select(Taxa, sample_order_all)
+# write_delim(supp_table_seq, path = "Suppl-18s-seq-total.txt", delim = "\t")
+#
+# head(gr_counts_avg_wtax)
+supp_table_ASV <- gr_counts_avg_wtax %>%
+    # Remove control samples
+    filter(!(Sampletype == "Control")) %>% 
+    # total ASVs by like taxa
+    group_by(SAMPLEID, Sampletype, LocationName, Taxa) %>% 
+    summarise(ASV_total = n_distinct(Feature.ID)) %>% 
+    unite(SAMPLE, LocationName, Sampletype, SAMPLEID, sep = " ", remove = TRUE) %>% 
+    pivot_wider(names_from = SAMPLE, values_from = ASV_total, values_fill = 0) %>% 
+    arrange(Taxa) %>% 
+    select(Taxa, sample_order_all)
+# write_delim(supp_table_ASV, path = "Suppl-18s-asv-total.txt", delim = "\t")
+```
+
+
+### Plot factoring and parameters
+```{r factor for plotting}
+# unique(gr_counts_avg_TAXA$Taxa)
+level2ORDER <- c("Alveolata-Ciliates","Alveolata-Dinoflagellates","Alveolata-Syndiniales","Alveolata-Other","Rhizaria-Cercozoa","Rhizaria-Radiolaria","Rhizaria-Other","Stramenopiles-MAST","Stramenopiles-Ochrophyta","Stramenopiles-Bicoecea","Stramenopiles-Other","Hacrobia-Cryptophyta","Hacrobia-Haptophyta","Hacrobia-Other","Amoebozoa","Excavata","Apusozoa","Archaeplastida-Chlorophyta","Archaeplastida-Other","Opisthokonta-Fungi","Opisthokonta-Metazoa","Opisthokonta-Other","Unassigned-Eukaryote")
+
+level2color <- c("#f1eef6","#d7b5d8","#df65b0","#ce1256","#fc9272","#ef3b2c","#800026","#fff7bc","#fec44f","#d95f0e","#a63603","#74c476","#238b45","#00441b","#7fcdbb","#084081","#c6dbef","#2b8cbe","#016c59","#bcbddc","#807dba","#54278f","#bdbdbd", "black")
+gr_counts_avg_TAXA$LEVEL2ORDER <- factor(gr_counts_avg_TAXA$Taxa, levels=level2ORDER)
+names(level2color)<-level2ORDER
+
+sample_order_all<-c("Shallow seawater in situ sterivex","Deep seawater in situ sterivex", "Near vent BW in situ sterivex","Near vent BW Grazing T0","Near vent BW Grazing T24","Near vent BW Grazing T36","Mt Edwards Plume in situ sterivex","Mt Edwards Vent in situ SUPR","Mt Edwards Vent Grazing T0","Mt Edwards Vent Grazing T36","Venti Latte Vent in situ SUPR","Venti Latte Vent Grazing T0","Venti Latte Vent Grazing T36","Candelabra Plume in situ sterivex","Candelabra Vent in situ SUPR","Candelabra Vent Grazing T24","SirVentsAlot Vent in situ SUPR","SirVentsAlot Vent Grazing T24")
+
+
+sample_name_all<-c("Shallow seawater in situ","Deep seawater in situ","Near vent BW in situ","Near vent BW Grazing T0","Near vent BW Grazing T24","Near vent BW Grazing T36","Mt Edwards Plume in situ","Mt Edwards Vent in situ","Mt Edwards Vent Grazing T0","Mt Edwards Vent Grazing T36","Venti Latte Vent in situ","Venti Latte Vent Grazing T0","Venti Latte Vent Grazing T36","Candelabra Plume in situ","Candelabra Vent in situ","Candelabra Vent Grazing T24","SirVentsAlot Vent in situ","SirVentsAlot Vent Grazing T24")
+
+
+gr_counts_avg_TAXA$SAMPLE_ORDER <- factor(gr_counts_avg_TAXA$SAMPLE, levels = sample_order_all, labels = sample_name_all)
+
+
+exporder <- c("sterivex", "SUPR", "T0", "T24", "T36")
+gr_counts_avg_TAXA$SAMPLEID_ORDER <- factor(gr_counts_avg_TAXA$SAMPLEID, levels = exporder)
+gr_counts_avg_TAXA$LOCATION_ORDER <- factor(gr_counts_avg_TAXA$LocationName, levels=c("Shallow seawater", "Deep seawater", "Near vent BW", "Mt Edwards Plume","Mt Edwards Vent", "Venti Latte Vent", "Candelabra Plume","Candelabra Vent", "SirVentsAlot Vent"))
+# head(gr_counts_avg_TAXA)
+
+# Factor for dataframe with replicates
+gr_counts_wreps_TAXA$LEVEL2ORDER <- factor(gr_counts_wreps_TAXA$Taxa, levels=level2ORDER)
+gr_counts_wreps_TAXA$SAMPLE_ORDER <- factor(gr_counts_wreps_TAXA$SAMPLE, levels = sample_order_all, labels = sample_name_all) # Factor by sample, but will plot x as sample with reps
+gr_counts_wreps_TAXA$SAMPLEID_ORDER <- factor(gr_counts_wreps_TAXA$SAMPLEID, levels = exporder)
+gr_counts_wreps_TAXA$LOCATION_ORDER <- factor(gr_counts_wreps_TAXA$LocationName, levels=c("Shallow seawater", "Deep seawater", "Near vent BW", "Mt Edwards Plume","Mt Edwards Vent", "Venti Latte Vent", "Candelabra Plume","Candelabra Vent", "SirVentsAlot Vent"))
+```
+
+## Protistan community barplots
+```{r plot function}
+barplot_lev2 <- function(df){
+  ggplot(df, aes(x=SAMPLE_ORDER, y=SUM, fill=LEVEL2ORDER)) +
+    geom_bar(stat="identity", position="fill", color="black") +
+    scale_fill_manual(values=level2color) +
+    scale_y_continuous(expand = c(0,0))+
+    theme(legend.position = "right",
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.border = element_blank(),
+          panel.background = element_blank(),
+          axis.text.x = element_text(angle=90, hjust=1, vjust=0.5, color = "black", size = 12),
+          axis.text.y = element_text(color="black", size = 12),
+          axis.title = element_text(color="black", size = 12),
+          strip.text = element_blank(),
+          legend.title = element_blank()) +
+    labs(x="", y="Relative abundance")+
+    facet_grid(.~LOCATION_ORDER, space = "free", scales = "free") +
+    guides(fill=guide_legend(ncol=1))
+}
+barplot_lev2_wreps <- function(df){
+  ggplot(df, aes(x=SAMPLE_REPS, y=SUM, fill=LEVEL2ORDER)) +
+    geom_bar(stat="identity", position="fill", color="black") +
+    scale_fill_manual(values=level2color) +
+    scale_y_continuous(expand = c(0,0))+
+    theme(legend.position = "right",
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.border = element_blank(),
+          panel.background = element_blank(),
+          axis.text.x = element_text(angle=90, hjust=1, vjust=0.5, color = "black", size = 12),
+          axis.text.y = element_text(color="black", size = 12),
+          axis.title = element_text(color="black", size = 12),
+          strip.text = element_blank(),
+          legend.title = element_blank()) +
+    labs(x="", y="Relative abundance")+
+    facet_grid(.~SAMPLE_ORDER, space = "free", scales = "free") +
+    guides(fill=guide_legend(ncol=1))
+}
+
+insitu <- c("sterivex", "SUPR")
+rm <- c("Unassigned", "Opisthokonta-Other", "Opisthokonta-Fungi", "Opisthokonta-Metazoa")
+```
+
+```{r Figure taxa with all replicates, fig.height = 10, fig.width = 16}
+# svg("figs/barplot-taxalevel-wReps.svg", h = 9, w = 13)
+barplot_lev2_wreps(gr_counts_wreps_TAXA)
+# dev.off()
+```
+
+```{r Figure generation-all, fig.height = 8, fig.width = 10}
+insitu <- c("sterivex", "SUPR")
+rm <- c("Unassigned", "Opisthokonta-Other", "Opisthokonta-Fungi", "Opisthokonta-Metazoa")
+
+nometaz_all <- barplot_lev2(filter(gr_counts_avg_TAXA, !(Taxa %in% rm)))
+nometaz_all
+```
+
+```{r Supplemental plot with metazoa, fig.height = 8, fig.width = 10}
+
+# withmetaz_all <- barplot_lev2(filter(gr_counts_avg_TAXA))
+# 
+# # svg("figs/SUPPLEMENTARY-GR-tax-barplot-wmetaz.svg", w = 10, h = 8)
+# withmetaz_all
+# dev.off()
+```
+
+
+
+# Ordination analysis
+
+## Import 18S-derived data
+```{r Load libraries for ordination, warning=FALSE, message=FALSE}
+load("data-input/GordaRidge-ASVtable-avg.RData")
+ventnames <- read.delim("data-input/ventnames-gordaridge.txt")
+library(reshape2); 
+library(vegan); 
+library(dplyr)
+library(ade4); 
+library(compositions); 
+library(tidyverse)
+library(purrr)
+library(cluster)
+library(RColorBrewer)
+library(ape)
+# ventnames
+```
+
+```{r Remove controls}
+# Remove controls, pivot wider, and make feature ID rownames
+gr_nums_wide <- counts_decont %>% 
+  filter(!(SAMPLEID == "CTRL")) %>% 
+  filter(!(grepl("GordaRidge_BSW020", SAMPLE))) %>% 
+  select(Feature.ID, SAMPLE, COUNT, REP) %>% 
+  left_join(ventnames, by = c("SAMPLE" = "SAMPLENAME")) %>%
+    mutate(LocationName = case_when(
+      LOCATION_SPECIFIC == "Plume036" ~ "Candelabra Plume",
+      LOCATION_SPECIFIC == "Plume096" ~ "Mt Edwards Plume",
+      TRUE ~ as.character(LocationName)
+    )) %>%  
+  unite(SAMPLE_MOD, LocationName, Sampletype, SAMPLEID, REP, sep = "-") %>% 
+  select(Feature.ID, COUNT, SAMPLE_MOD) %>% 
+  pivot_wider(names_from = SAMPLE_MOD, values_from = COUNT, values_fill = 0) %>% 
+  column_to_rownames(var = "Feature.ID")
+```
+
+## Cluster analysis
+```{r Average hierarchical clustering}
+# Fix column names
+gr_for_dendro <- gr_nums_wide
+colnames(gr_for_dendro) <- gsub(x = names(gr_for_dendro), pattern = "-", replacement = " ")  
+
+# Relative abundance
+relabun <- decostand(gr_for_dendro, MARGIN = 2, method = "total")
+# colSums(relabun) # Should all equal to 1
+
+# Cluster dendrogram (average hierarchical clustering)
+cluster_gr <- hclust(dist(t(relabun)), method = "average")
+# ?hclust()
+# ?dist()
+# ?decostand
+```
+
+```{r Import into ggdendro, message=FALSE}
+library(ggdendro); library(dendextend)
+
+dendro <- as.dendrogram(cluster_gr)
+gr_dendro <- dendro_data(dendro, type = "rectangle")
+```
+
+
+```{r Base dendrogram plot, fig.height=8, fig.width=10}
+gr_dendro_plot <- ggplot(segment(gr_dendro)) + 
+  geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) + 
+  coord_flip() + 
+  scale_y_reverse(expand = c(0.2, 0.5), breaks = c(0, 0.2, 0.4, 0.6, 0.8)) +
+  geom_text(aes(x = x, y = y, label = label, angle = 0, hjust = 0), data= label(gr_dendro)) +
+  theme_dendro() +
+  labs(y = "Dissimilarity") +
+  theme(axis.text.x = element_text(color = "black", size = 14),
+        axis.line.x = element_line(color = "#252525"),
+        axis.ticks.x = element_line(),
+        axis.title.x = element_text(color = "black", size = 14))
+# svg("figs/SUPPLEMENTARY-dendrogram-wreps.svg", w = 10, h = 8)
+gr_dendro_plot
+# dev.off()
+```
+
+## Data transformation-CLR
+```{r Make screeplot,fig.height=4, fig.width=6}
+# # Transform data - with CLR
+# # Log-ratio
+log_rats<-data.frame(compositions::clr(t(gr_nums_wide)))
+# log_rats
+# # look at eigenvalues
+pca_lr <- prcomp(log_rats)
+variance_lr <- (pca_lr$sdev^2)/sum(pca_lr$sdev^2)
+# head(variance_lr)
+barplot(variance_lr,
+        main='Log-Ratio PCA Screeplot',
+        xlab='PC Axis',
+        ylab='% Variance',
+        cex.names=1.5,cex.axis=1.5,cex.lab=1.5,cex.main=1.5)
+```
+> Based on this screeplot - 2 axis are OK, as they show 0.079 and 0.077, respectively, of the variance.
+
+
+## Plot PCA
+```{r Extract points}
+# Extract PCA points
+# pca_lr$x
+pca_lr_frame<-data.frame(pca_lr$x, SAMPLE=rownames(pca_lr$x))
+
+pca_lr_frame_wNames <- pca_lr_frame %>% 
+  rownames_to_column(var = "SAMPLENAME") %>% 
+  separate(SAMPLENAME, c("LocationName", "Sampletype", "SampleID", "REP"), "-", remove = FALSE) %>% 
+  unite(shape_sample, LocationName, Sampletype, sep = " ", remove = FALSE)
+# unique(pca_lr_frame_wNames$LocationName)
+```
+
+```{r Factor for PCA plot}
+# Factor for plotting
+sample_order_all <- c("Shallow seawater","Deep seawater","Near vent BW","Mt Edwards Plume","Mt Edwards Vent","Venti Latte Vent","Candelabra Plume","Candelabra Vent","SirVentsAlot Vent")
+sample_label_all <- c("Shallow BSW","Deep BSW","Near vent BW","Mt. Edwards Plume","Mt. Edwards","Venti latte","Candelabra Plume","Candelabra","Sir Ventsalot")
+sample_color_all <-c("#bfbbb0","#413f44","#6f88af","#61ac86","#61ac86","#711518","#dfa837","#dfa837","#ce536b")
+names(sample_color_all) <- sample_label_all
+
+shape_order <- c("Candelabra Plume in situ","Candelabra Vent Grazing","Candelabra Vent in situ","Deep seawater in situ","Mt Edwards Plume in situ","Mt Edwards Vent Grazing","Mt Edwards Vent in situ","Near vent BW Grazing","Near vent BW in situ","Shallow seawater in situ","SirVentsAlot Vent Grazing","SirVentsAlot Vent in situ","Venti Latte Vent Grazing","Venti Latte Vent in situ")
+shapes <- c(24, 21, 21, 22, 24, 21, 21, 23, 23, 22, 21, 21, 21, 21)
+fill_color <- c("#dfa837","white","#dfa837","#413f44","#61ac86","white","#61ac86","white","#6f88af","#bfbbb0","white","#ce536b","white","#711518")
+color_color <- c("#dfa837","#dfa837","#dfa837","#413f44","#61ac86","#61ac86","#61ac86","#6f88af","#6f88af","#bfbbb0","#ce536b","#ce536b","#711518","#711518")
+pca_lr_frame_wNames$SAMPLE_ORDER <- factor(pca_lr_frame_wNames$LocationName, levels = rev(sample_order_all), labels = rev(sample_label_all))
+
+pca_lr_frame_wNames$SHAPE_ORDER <- factor(pca_lr_frame_wNames$shape_sample, levels = shape_order)
+```
+
+```{r Generate 18S PCA, fig.height=5, fig.width=6}
+pca_18s <- ggplot(pca_lr_frame_wNames, 
+                  aes(x = PC1, y = PC2,
+                      fill = SHAPE_ORDER, 
+                      color = SHAPE_ORDER,
+                      shape = SHAPE_ORDER)) + #Replace label=SAMPLEID.y
+  # geom_text_repel(size = 3,
+  #                  box.padding = unit(0.5, "lines"))+
+  geom_hline(yintercept = 0) + geom_vline(xintercept = 0, color = "#525252") +
+  geom_point(size=4, stroke = 1.5, aes(fill=SHAPE_ORDER, color = SHAPE_ORDER, shape = SHAPE_ORDER)) +
+  ylab(paste0('PC2 ',round(variance_lr[2]*100,2),'%')) +
+  xlab(paste0('PC1 ',round(variance_lr[1]*100,2),'%')) +
+  scale_shape_manual(values = shapes) +
+  scale_fill_manual(values = fill_color) +
+  scale_color_manual(values = color_color) +
+  theme_bw() +
+  theme(axis.text = element_text(color="black", size=12),
+        legend.title = element_blank())
+# pca_18s
+```
+
+## Plot 18S barplot with PCA
+```{r plot, fig.height=8, fig.width=18}
+# svg("figs/panel-barplot-pca-18S-nolabel.svg", w = 18, h = 8)
+plot_grid(nometaz_all, pca_18s, nrow = 1, 
+          labels = c("a", "b"), rel_widths = c(1,0.85),
+          align = c("hv"), axis = c("tblr")) 
+# dev.off()
+```
+
+# Classify 18S ASVs by distribution
+To test the hypothesis that protistan species may be enriched at vent sites compared to surrounding seawater, 18S-derived ASVs were characterized by distribution. 
+## Import data and classify ASVs
+
+```{r set envs and import data}
+# Import averaged across replicates data
+load("data-input/GordaRidge-ASVtable-avg.RData",verbose = T)
+# unique(gr_counts_avg_wtax[, c("Sampletype", "LocationName")]) #categories to consider
+# unique(gr_counts_avg_wtax$LocationName)
+```
+### Categorize ASVs based on presence
+```{r Convert to wide}
+gr_wide <- gr_counts_avg_wtax %>% 
+  type.convert(as.is = TRUE) %>%
+  filter(!(Sampletype == "Control")) %>% 
+  filter(COUNT_AVG > 0) %>% 
+  unite(sample_type, LocationName, Sampletype, sep = "_") %>% 
+  select(Feature.ID, sample_type, COUNT_AVG) %>% 
+  pivot_wider(names_from = sample_type, values_from = COUNT_AVG, values_fill = 0, values_fn = sum) %>% 
+  rowwise() %>%
+  mutate_at(vars(Feature.ID), factor) %>% 
+  mutate(total = sum(c_across(where(is.numeric)))) %>% 
+  data.frame
+# names(gr_wide)
+```
+
+```{r Add categorized columns, message=FALSE, warning=FALSE}
+# Import classifications
+classifcation_schema <- read.delim("data-input/vent-asv-classification.txt")
+
+# From the purr function
+any_cols <- function(gr_wide) reduce(gr_wide, `|`)
+
+gr_classified <- gr_wide %>%
+    mutate(VENT_x = ifelse(any_cols(across(contains("Vent_in.situ"), ~`>`(.,0))), "vent", ""),
+           VENTGRAZE_x = ifelse(any_cols(across(contains("Vent_Grazing"), ~`>`(.,0))), "ventgraze", ""),
+           NEAR_x = ifelse(any_cols(across(contains("Near.vent.BW_in.situ"), ~`>`(.,0))), "near", ""),
+           NEARGRAZE_x = ifelse(any_cols(across(contains("Near.vent.BW_Grazing"), ~`>`(.,0))), "neargraze", ""),
+           PLUME_x = ifelse(any_cols(across(contains("Plume_in.situ"), ~`>`(.,0))), "plume", ""),
+           BACK_x = ifelse(any_cols(across(contains("seawater"), ~`>`(.,0))), "bsw", "")) %>% 
+  unite(COMPILED, ends_with("_x"), sep = "", remove = FALSE) %>% 
+  left_join(classifcation_schema) %>% 
+  mutate(CLASS_COMPLEX = case_when(
+    total == 1 ~ "Unique",
+    TRUE ~ as.character(CLASS_COMPLEX)),
+    CLASS_SIMPLE_I = case_when(
+    total == 1 ~ "Unique",
+    TRUE ~ as.character(CLASS_SIMPLE_I)),
+    CLASS_SIMPLE_II = case_when(
+    total == 1 ~ "Unique",
+    TRUE ~ as.character(CLASS_SIMPLE_II))) %>%
+  mutate(sirvents_graze = case_when(
+    (SirVentsAlot.Vent_Grazing > 0 & SirVentsAlot.Vent_in.situ > 0) ~ "sirvents"),
+    candelabra_graze = case_when(
+    (Candelabra.Vent_Grazing > 0 & Candelabra.Vent_in.situ > 0) ~ "candelabra"),
+    edwards_graze = case_when(
+    (Mt.Edwards.Vent_Grazing > 0 & Mt.Edwards.Vent_in.situ > 0) ~ "edwards"),
+    latte_graze = case_when(
+    (Venti.Latte.Vent_Grazing > 0 & Venti.Latte.Vent_in.situ > 0) ~ "latte"),
+    near_graze = case_when(
+    (Near.vent.BW_Grazing > 0 & Near.vent.BW_in.situ > 0) ~ "near")) %>% 
+  unite(COMPILED_graze, ends_with("_graze"), sep = "", remove = FALSE) %>%
+  select(Feature.ID, starts_with("CLASS_"), ends_with("_graze")) %>% 
+  distinct() %>% 
+  data.frame
+# head(gr_classified)
+```
+
+## Combine distribution with original ASV table
+Print report on total ASV counts that fall into each category.
+```{r Join with 18S count data, warning=FALSE, message=FALSE}
+gr_sorted <- left_join(gr_counts_avg_wtax, gr_classified) %>%
+  filter(!(Sampletype == "Control"))
+# head(gr_sorted)
+
+# Stats
+total <- sum(gr_sorted$COUNT_AVG); total #1.26 million sequences
+gr_sorted_summary_simpleI <- gr_sorted %>%
+  group_by(CLASS_SIMPLE_I) %>%
+  summarise(totalasv = n_distinct(Feature.ID), totalseq = sum(COUNT_AVG)) %>%
+  mutate(Perc_seq = 100*(totalseq/total)) %>% 
+  data.frame
+
+gr_sorted_summary_simpleII <- gr_sorted %>%
+  group_by(CLASS_SIMPLE_II) %>%
+  summarise(totalasv = n_distinct(Feature.ID), totalseq = sum(COUNT_AVG)) %>%
+  mutate(Perc_seq = 100*(totalseq/total)) %>% 
+  data.frame
+
+gr_sorted_summary_complex <- gr_sorted %>%
+  group_by(CLASS_COMPLEX) %>%
+  summarise(totalasv = n_distinct(Feature.ID), totalseq = sum(COUNT_AVG)) %>%
+  mutate(Perc_seq = 100*(totalseq/total)) %>% 
+  data.frame
+# View(gr_sorted_summary_simpleI)
+# View(gr_sorted_summary_simpleII)
+# View(gr_sorted_summary_complex)
+```
+
+```{r Final modifications for ASV classification dataframes}
+# head(gr_sorted)
+# distribution_simple vs detailed
+gr_dist <- gr_sorted %>% 
+  select(Feature.ID, CLASS_SIMPLE_I, CLASS_SIMPLE_II) %>% 
+  distinct() %>% 
+  mutate(DIST_simple = case_when(
+    CLASS_SIMPLE_I == "Background" ~ "Other",
+    CLASS_SIMPLE_I == "Unique" ~ "Other",
+    TRUE ~ CLASS_SIMPLE_I
+  )) %>% 
+  select(Feature.ID, DIST_simple, DIST_detail = CLASS_SIMPLE_II) %>% 
+  data.frame
+
+# Select grazing enriched samples
+gr_dist_grazing <- gr_sorted %>% 
+  select(Feature.ID, ends_with("_graze")) %>% 
+  distinct() %>% 
+  filter(!(COMPILED_graze == "NANANANANA")) %>% 
+  add_column(Graze_enriched = "Enriched") %>% 
+  data.frame
+# dim(gr_dist_grazing)
+# table(gr_dist_grazing$COMPILED_graze)
+```
+
+### Include distribution with taxonomic annotations
+```{r Join datasets, warning=FALSE, message=FALSE}
+
+gr_stats_wtax <- left_join(gr_counts_avg_wtax, gr_dist) %>%
+    filter(!(Sampletype == "Control")) %>% 
+    data.frame
+
+gr_wtax_dist_simple <- gr_stats_wtax %>% 
+    group_by(Taxa, DIST_simple) %>% 
+    summarise(totalasv = n(), totalseq = sum(COUNT_AVG)) %>%
+    ungroup() %>% 
+    group_by(Taxa, DIST_simple) %>% 
+    summarise(totalasvs = sum(totalasv), 
+            sumseqs = sum(totalseq)) %>%
+    mutate(percentseq = sumseqs/sum(sumseqs)*100) %>% 
+    pivot_wider(names_from = DIST_simple, names_glue = "{DIST_simple}_{.value}",
+                values_from = c(totalasvs, sumseqs, percentseq)) %>%
+    data.frame
+# View(gr_wtax_dist_simple)
+# write_delim(gr_wtax_dist_simple, path = "Distribution-ASVs-bytax.txt", delim = "\t")
+
+gr_wtax_dist_detailed <- gr_stats_wtax %>% 
+    group_by(Taxa, DIST_detail) %>% 
+    summarise(totalasv = n(), totalseq = sum(COUNT_AVG)) %>%
+    ungroup() %>% 
+    group_by(Taxa, DIST_detail) %>% 
+    summarise(totalasvs = sum(totalasv), 
+            sumseqs = sum(totalseq)) %>%
+    mutate(percentseq = sumseqs/sum(sumseqs)*100) %>% 
+    pivot_wider(names_from = DIST_detail, names_glue = "{DIST_detail}_{.value}",
+                values_from = c(totalasvs, sumseqs, percentseq)) %>%
+    data.frame
+# View(gr_wtax_dist_detailed)
+# write_delim(gr_wtax_dist_detailed, path = "Distribution-ASVs-bytax-detailed.txt", delim = "\t")
+```
+
+## Plot ASV & sequence abundance by distribution
+Generate bar plot that summarized sequence and ASV abundance by distribution of ASV. Simple distribution determined above mentioned in text of manuscript, more detailed outline of ASV classifications for the supplementary section.
+
+```{r Refined data for plotting}
+gr_stats_wtax_toplot <- gr_stats_wtax %>% 
+  unite(sample, LocationName, Sampletype, SAMPLEID, sep = " ", remove = FALSE) %>% 
+  group_by(sample, LocationName, Sampletype, SAMPLEID, DIST_detail) %>% 
+  summarise(totalasvs = n_distinct(Feature.ID), 
+            sumseqs = sum(COUNT_AVG)) %>%
+  data.frame
+# head(gr_stats_wtax_toplot)
+# unique(gr_stats_wtax_toplot$sample)
+```
+
+```{r Factor for plotting}
+
+sample_order_all<-c("Shallow seawater in situ sterivex","Deep seawater in situ sterivex", "Near vent BW in situ sterivex","Near vent BW Grazing T0","Near vent BW Grazing T24","Near vent BW Grazing T36","Mt Edwards Plume in situ sterivex","Mt Edwards Vent in situ SUPR","Mt Edwards Vent Grazing T0","Mt Edwards Vent Grazing T36","Venti Latte Vent in situ SUPR","Venti Latte Vent Grazing T0","Venti Latte Vent Grazing T36","Candelabra Plume in situ sterivex","Candelabra Vent in situ SUPR","Candelabra Vent Grazing T24","SirVentsAlot Vent in situ SUPR","SirVentsAlot Vent Grazing T24")
+
+sample_name_all<-c("Shallow seawater in situ","Deep seawater in situ","Near vent BW in situ","Near vent BW Grazing T0","Near vent BW Grazing T24","Near vent BW Grazing T36","Mt Edwards Plume in situ","Mt Edwards Vent in situ","Mt Edwards Vent Grazing T0","Mt Edwards Vent Grazing T36","Venti Latte Vent in situ","Venti Latte Vent Grazing T0","Venti Latte Vent Grazing T36","Candelabra Plume in situ","Candelabra Vent in situ","Candelabra Vent Grazing T24","SirVentsAlot Vent in situ","SirVentsAlot Vent Grazing T24")
+
+location_order <- c("Shallow seawater","Deep seawater","Near vent BW","Mt Edwards Plume","Mt Edwards Vent","Venti Latte Vent","Candelabra Plume","Candelabra Vent","SirVentsAlot Vent")
+
+location_order_name <- c("Shallow BSW","Deep BSW","Near vent BW","Mt. Edwards Plume","Mt. Edwards","Venti latte","Candelabra Plume","Candelabra","Sir Ventsalot")
+
+gr_stats_wtax_toplot$SAMPLE_ORDER <- factor(gr_stats_wtax_toplot$sample, levels = sample_order_all, labels = sample_name_all)
+exporder <- c("sterivex", "SUPR", "T0", "T24", "T36")
+gr_stats_wtax_toplot$SAMPLEID_ORDER <- factor(gr_stats_wtax_toplot$SAMPLEID, levels = exporder)
+
+location_order <- c("Shallow seawater","Deep seawater","Near vent BW","Mt Edwards Plume","Mt Edwards Vent","Venti Latte Vent","Candelabra Plume","Candelabra Vent","SirVentsAlot Vent")
+location_order_name <- c("Shallow BSW","Deep BSW","Near vent BW","Mt. Edwards Plume","Mt. Edwards","Venti latte","Candelabra Plume","Candelabra","Sir Ventsalot")
+
+gr_stats_wtax_toplot$LOCATION_ORDER <- factor(gr_stats_wtax_toplot$LocationName, levels = location_order, labels = location_order_name)
+```
+
+```{r Factor for plotting distribution, warning=FALSE, message=FALSE}
+# Factor for distribution
+category_order <- c("Vent local","Vent local (no background, no vent)","Vent resident","Vent resident and background","Background and vent local (w vent)","Background and vent local (no vent)","Background","Other","Unique")
+category_color <- c("#e31a1c","#fc4e2a","#feb24c","#ffeda0","#c7e9b4","#7fcdbb","#1d91c0","#225ea8","#0c2c84")
+gr_stats_wtax_toplot$CATEGORY_ORDER <- factor(gr_stats_wtax_toplot$DIST_detail, levels = category_order)
+names(category_color) <- category_order
+```
+
+
+```{r Plot total sequences by distribution}
+totalseq <- ggplot(gr_stats_wtax_toplot, aes(x=SAMPLE_ORDER, y=sumseqs, fill=CATEGORY_ORDER)) +
+  geom_bar(stat = "identity", color = "black", position = "fill") + 
+#   scale_fill_brewer(palette = "Accent") +
+  scale_fill_manual(values = category_color) +
+  scale_y_continuous(expand = c(0, 0)) +
+  facet_grid(. ~ LOCATION_ORDER, space = "free", scales = "free")+
+  theme(legend.position = "right",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x = element_text(angle=90, hjust=1, vjust=0.5, color = "black", face="bold"),
+        axis.text.y = element_text(color="black", face="bold"),
+        strip.text = element_blank(),
+        strip.background = element_blank(),
+        legend.title = element_blank()) +
+  labs(x="", y="")
+# totalseq
+```
+
+```{r Plot ASVs by distribution}
+totalasv <- ggplot(gr_stats_wtax_toplot, aes(x=SAMPLE_ORDER, y= totalasvs, fill=CATEGORY_ORDER)) +
+  geom_bar(stat = "identity", color = "black", position = "fill") + 
+  scale_fill_manual(values = category_color) +
+  scale_y_continuous(expand = c(0, 0)) +
+  facet_grid(. ~ LOCATION_ORDER, space = "free", scales = "free") +
+  theme(legend.position = "right",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        axis.text.x = element_text(angle=90, hjust=1, vjust=0.5, color = "black", face="bold"),
+        axis.text.y = element_text(color="black", face="bold"),
+        strip.text = element_blank(),
+        strip.background = element_blank(),
+        legend.title = element_blank()) +
+  labs(x="", y="")
+# totalasv
+```
+
+```{r Supplmentary figure with all ASV categories, fig.height=8, fig.width=16}
+# Supplementary figure
+# svg("figs/SUPPLEMENTARY-seq-asv-distribution.svg", h = 8, w = 16)
+plot_grid(totalseq + labs(y="Relative sequence abundance") + theme(legend.position = "none"), totalasv + labs(y="Relative ASV abundance"),
+          totalseq + geom_bar(stat = "identity", color = "black", position = "stack") + labs(y = "Total sequences") + theme(legend.position = "none"),
+          totalasv + geom_bar(stat = "identity", color = "black", position = "stack") + labs(y = "Total ASVs"),
+          labels = c("a", "b", "c", "d"), axis = c("lrtb"), align = c("vh"))
+# dev.off()
+```
+
+
+```{r Save output dataframes for future use, categorized ASVs}
+# save(gr_stats_wtax_toplot, gr_stats_wtax, gr_dist_grazing, gr_dist, file = "data-input/GR-countinfo-withASVdistribution.RData")
+
+# gr_dist = all ASV classification
+# gr_dist_grazing = ASVs that are found in situ and in grazing
+# gr_stats_wtax = complete full table with ASV classifications
+# gr_stats_wtax_tplot = summarized for making figures
+```
+
+
+# 18S bar plots - taxonomic resolution
+```{r Import data}
+load("data-input/GordaRidge-ASVtable-avg.RData",verbose=T)
+load("data-input/GR-countinfo-withASVdistribution.RData", verbose=T)
+```
+
+## Re-curate taxonomic levels (higher resolution)
+
+```{r View major taxonomic groups}
+# head(gr_stats_wtax)
+unique(gr_stats_wtax$Taxa)
+# View(gr_stats_wtax %>% filter(Taxa == "Stramenopiles-Bicoecea"))
+```
+
+This is a another function for further refinement of the taxonomic assignments.
+```{r Refine protistan taxonomic assignment}
+# Add Taxa2 level
+expand_taxa2 <- function(df){
+    sumseq <- sum(df$COUNT_AVG)
+    # Sum asv totals
+    df_tmp <- df %>% group_by(Feature.ID) %>% 
+      summarise(SUM_ASV = sum(COUNT_AVG)) %>% 
+      mutate(RelAbun = 100*(SUM_ASV/sumseq)) %>% 
+      filter(RelAbun > 0.01) %>% 
+      data.frame
+    topASVs18s <- as.character(unique(df_tmp$Feature.ID)) #Select ASVs > 0.01% of data
+    df$Taxa <- as.character(df$Taxa); df$Order <- as.character(df$Order)
+    df$Class <- as.character(df$Class); df$Division <- as.character(df$Division)
+    non_ciliate <- c("Alveolata-Syndiniales", "Alveolata-Dinoflagellates", "Alveolata-Other")
+    order <- c("Alveolata-Syndiniales", "Alveolata-Dinoflagellates")
+    class <- c("Alveolata-Ciliates", "Opisthokonta-Metazoa", "Opisthokonta-Fungi", "Opisthokonta-Other", "Rhizaria-Cercozoa", "Rhizaria-Radiolaria")
+    df2 <- df %>% 
+      type.convert(as.is = TRUE) %>%
+      mutate(Taxa2 = Taxa) %>% # Duplicate Taxa column
+      mutate(Taxa2 = ifelse(Taxa %in% order, Order, Taxa2),
+             Taxa2 = ifelse(Taxa %in% class, Class, Taxa2),
+             Taxa2 = ifelse(Taxa %in% "Amoebozoa", Division, Taxa2),#
+             Taxa2 = ifelse(Taxa %in% "Apusozoa", Division, Taxa2),#
+             # Curate Ciliates
+             Taxa2 = ifelse(Class == "Spirotrichea", paste(Class, Order, sep = "-"), Taxa2),
+             Taxa2 = ifelse(grepl("Spirotrichea_", Taxa2), "Spirotrichea-Other", Taxa2),
+             Taxa2 = ifelse(grepl("Spirotrichea-NA", Taxa2), "Spirotrichea-Other", Taxa2),
+             Taxa2 = ifelse(grepl("Spirotrichea-Strombidiida_", Taxa2), "Spirotrichea-Strombidiida", Taxa2),
+             Taxa2 = ifelse(grepl("Prostomatea_1", Taxa2), "Prostomatea", Taxa2),
+             Taxa2 = ifelse(grepl("CONTH_", Taxa2), "Alveolata-Ciliates", Taxa2),
+             Taxa2 = ifelse(grepl("CONThreeP", Taxa2), "Alveolata-Ciliates", Taxa2),
+             # Curate dinoflagellates and Syndiniales
+             Taxa2 = ifelse(grepl("Dino-Group-", Taxa2), "Syndiniales Dino-Groups (I-V)", Taxa2),
+             Taxa2 = ifelse(Taxa2 %in% non_ciliate, "Alveolata-Other", Taxa2),
+             Taxa2 = ifelse(Division == "Apicomplexa", "Apicomplexa", Taxa2),
+             # Curate Radiolaria
+             Taxa2 = ifelse(Class == "Acantharea", "Rhizaria-Acantharea", Taxa2),
+             # Taxa2 = ifelse(grepl("Acantharea-Group-", Taxa2), "Acantharea-Groups (I,II,VI)", Taxa2),
+             Taxa2 = ifelse(Class == "Polycystinea", paste(Class, Order, sep = "-"), Taxa2),
+             Taxa2 = ifelse(Taxa2 == "Rhizaria-Radiolaria-Other", "Rhizaria-Radiolaria", Taxa2),
+             Taxa2 = ifelse(Taxa2 == "Rhizaria-Cercozoa-Other", "Rhizaria-Cercozoa", Taxa2),
+             Taxa2 = ifelse(Taxa2 == "Endomyxa-Ascetosporea", "Endomyxa", Taxa2),
+             Taxa2 = ifelse(Taxa2 == "Novel-clade-10-12", "Rhizaria-Cercozoa", Taxa2),
+             Taxa2 = ifelse(Taxa2 == "Chlorarachniophyceae", "Rhizaria-Cercozoa", Taxa2),
+             Taxa2 = ifelse(Taxa2 == "Rhizaria-Other", "Rhizaria-Other", Taxa2),
+             # Add hacrobia resolution
+             Taxa2 = ifelse(Taxa2 == "Hacrobia-Other", Division, Taxa2),
+             # Add Excavata resolution
+             Taxa2 = ifelse(Taxa2 == "Excavata", Division, Taxa2),
+             # Curate Stramenopiles
+             Taxa2 = ifelse(Taxa2 == "Stramenopiles-Ochrophyta", Class, Taxa2),
+             Taxa2 = ifelse(Taxa2 == "Stramenopiles-MAST", "MAST", Taxa2),
+             Taxa2 = ifelse(grepl("MOCH-", Taxa2), "MOCH", Taxa2),
+             Taxa2 = ifelse(Taxa2 == "Stramenopiles-Bicoecea", Family, Taxa2),
+             # Archaeplastidia
+             Taxa2 = ifelse(Division == "Streptophyta", "Archaeplastida-Streptophyta", Taxa2),
+             # Curate other unknown - Move low abundance ASVs to "Other"
+             Taxa2 = ifelse(grepl("_X", Taxa2), Taxa, Taxa2),
+             Taxa2 = ifelse(is.na(Taxa2), Taxa, Taxa2),
+             Taxa2 = ifelse(Taxa2 == "Stramenopiles-Ochrophyta", "Stramenopiles-Other", Taxa2),
+             Taxa2 = ifelse(Taxa2 == "Unassigned-Eukaryote-Other", "Unassigned-Eukaryote", Taxa2),
+             # Fixing the designation of "Other"
+             Taxa2 = ifelse(Taxa2 == "Alveolata-Syndiniales", "Alveolata-Other", Taxa2),
+             Taxa2 = ifelse(Taxa2 == "Alveolata-Dinoflagellates", "Alveolata-Other", Taxa2),
+             Taxa2 = ifelse(Taxa2 == "Alveolata-Dinoflagellates", "Alveolata-Other", Taxa2),
+             Taxa2 = ifelse(Taxa2 == "Alveolata-Ciliates", "Ciliates-Other", Taxa2),
+             Taxa2 = ifelse(Taxa2 == "Alveolata-Ciliates", "Ciliates-Other", Taxa2)
+             ) %>%
+      mutate(Broad_Taxa = Taxa) %>%
+      mutate(Broad_Taxa = ifelse(Broad_Taxa %in% non_ciliate, "Alveolata", Broad_Taxa),
+             Broad_Taxa = ifelse(grepl("Rhizaria", Broad_Taxa), "Rhizaria", Broad_Taxa),
+             Broad_Taxa = ifelse(grepl("Stramenopiles", Broad_Taxa), "Stramenopiles", Broad_Taxa),
+             Broad_Taxa = ifelse(grepl("Archaeplastida", Broad_Taxa), "Archaeplastida", Broad_Taxa),
+             Broad_Taxa = ifelse(grepl("Hacrobia", Broad_Taxa), "Hacrobia", Broad_Taxa),
+             Broad_Taxa = ifelse(grepl("Opisthokonta", Broad_Taxa), "Opisthokonta", Broad_Taxa)) %>%
+  data.frame
+  return(df2)
+    }
+ 
+```
+
+```{r Apply taxonomic curation to table, message=FALSE, warning=FALSE}
+# Apply to ASV table
+gr_counts_avg_wtax2 <- expand_taxa2(gr_stats_wtax)
+# View(gr_counts_avg_wtax2)
+```
+
+## Include ASV distribution
+```{r Add ASV distribution information, message=FALSE, warning=FALSE}
+# Add categories & set up for plotting function
+gr_tax_res <- gr_counts_avg_wtax2 %>% 
+    left_join(gr_dist) %>% 
+    unite(sample, LocationName, Sampletype, SAMPLEID, sep = " ", remove = FALSE) %>% 
+    data.frame
+# save(gr_tax_res, file = "GR-alltax-dist-tax2.RData")
+```
+
+```{r Export table for supplementary, message=FALSE, warning=FALSE}
+# Make table summarizing taxa stats for each sample.
+# head(gr_tax_res)
+asv_seq_taxa <- gr_tax_res %>% 
+  group_by(LocationName, Sampletype, Taxa) %>% 
+    summarize(ASV_total = n_distinct(Feature.ID),
+              SEQ_sum = sum(COUNT_AVG)) %>% 
+    unite(sample, LocationName, Sampletype, sep = "-") %>% 
+    pivot_wider(names_from = sample, values_from = c(ASV_total, SEQ_sum), values_fill = 0) %>%
+    data.frame
+# head(asv_seq_taxa)
+# dim(asv_seq_taxa)
+#
+asv_seq_taxa2 <- gr_tax_res %>% 
+  group_by(LocationName, Sampletype, Taxa, Taxa2) %>% 
+    summarize(ASV_total = n_distinct(Feature.ID),
+              SEQ_sum = sum(COUNT_AVG)) %>% 
+    unite(sample, LocationName, Sampletype, sep = "-") %>%
+    pivot_wider(names_from = sample, values_from = c(ASV_total, SEQ_sum), values_fill = 0) %>% 
+  data.frame
+# ?pivot_wider
+# View(asv_seq_taxa_levels)
+# head(asv_seq_taxa2)
+# dim(asv_seq_taxa2)
+# write_delim(asv_seq_taxa, path = "taxa-asv-seq-stats.txt", delim = "\t")
+# write_delim(asv_seq_taxa2, path = "taxa2-asv-seq-stats.txt", delim = "\t")
+```
+
+## Plot function
+```{r factor and plot function}
+sample_order_all<-c("Shallow seawater in situ sterivex","Deep seawater in situ sterivex", "Near vent BW in situ sterivex","Near vent BW Grazing T0","Near vent BW Grazing T24","Near vent BW Grazing T36","Mt Edwards Plume in situ sterivex","Mt Edwards Vent in situ SUPR","Mt Edwards Vent Grazing T0","Mt Edwards Vent Grazing T36","Venti Latte Vent in situ SUPR","Venti Latte Vent Grazing T0","Venti Latte Vent Grazing T36","Candelabra Plume in situ sterivex","Candelabra Vent in situ SUPR","Candelabra Vent Grazing T24","SirVentsAlot Vent in situ SUPR","SirVentsAlot Vent Grazing T24")
+
+sample_name_all<-c("Shallow seawater in situ","Deep seawater in situ","Near vent BW in situ","Near vent BW Grazing T0","Near vent BW Grazing T24","Near vent BW Grazing T36","Mt Edwards Plume in situ","Mt Edwards Vent in situ","Mt Edwards Vent Grazing T0","Mt Edwards Vent Grazing T36","Venti Latte Vent in situ","Venti Latte Vent Grazing T0","Venti Latte Vent Grazing T36","Candelabra Plume in situ","Candelabra Vent in situ","Candelabra Vent Grazing T24","SirVentsAlot Vent in situ","SirVentsAlot Vent Grazing T24")
+
+gr_tax_res$SAMPLE_ORDER <- factor(gr_tax_res$sample, levels = sample_order_all, labels = sample_name_all)
+```
+
+
+```{r Format dataframe include all samples}
+# Format input data frame to plot heatmap across resident and cosmopolitan populations.
+tax_key <- gr_tax_res %>% 
+  select(Broad_Taxa, Taxa2) %>% 
+  distinct() %>% 
+  data.frame
+
+expand_tmp <- gr_tax_res %>% 
+  expand(SAMPLE = sample, RES_COSMO = DIST_simple, Taxa2) %>% 
+  filter(!(RES_COSMO == "Other"))
+
+# Subsetting to taxa of interest for the geom_tile:
+# RM
+others <- c("Unassigned-Eukaryote","Ciliates-Other", "Spirotrichea-Other", "Alveolata-Other", "Rhizaria-Other", "Stramenopiles-Other", "Stramenopiles-Bicoecea", "Amoebozoa", "Apusozoa", "Hacrobia-Other", "Archaeplastida-Other", "Archaeplastida-Streptophyta", "Archaeplastida-Chlorophyta")
+
+# Perform first formatting of data
+gr_relAbun_toheat_ONE <- gr_tax_res %>% 
+  # Remove unwanted samples - controls and ASVs that are not classified as cosmopolitan or resident
+  filter(!(Sampletype == "Control")) %>% 
+  filter(!(DIST_simple == "Other")) %>%
+  filter(Broad_Taxa != "Opisthokonta") %>% 
+  filter(!(Taxa2 %in% others)) %>% 
+  # Average across replicates - ASV sequence count averaged when ASV appears in replicate samples
+  group_by(Feature.ID, RES_COSMO = DIST_simple, SAMPLE = sample, Broad_Taxa, Taxa2) %>%
+  summarise(COUNT_AVG2 = mean(COUNT_AVG)) %>%
+  ungroup() %>% 
+  group_by(RES_COSMO, SAMPLE, Broad_Taxa, Taxa2) %>% 
+  summarise(SUM_TAXA2 = sum(COUNT_AVG2),
+            RICHNESS_TAXA2 = n_distinct(Feature.ID)) %>% 
+  data.frame
+
+# Get CLR transformed data
+# head(gr_relAbun_toheat_ONE)
+gr_taxa2_clr <- gr_relAbun_toheat_ONE %>% 
+  select(RES_COSMO, SAMPLE, Broad_Taxa, Taxa2, SUM_TAXA2) %>% 
+  pivot_wider(names_from = c("RES_COSMO", "SAMPLE"), values_from = SUM_TAXA2) %>% 
+  unite(tax, Broad_Taxa, Taxa2, sep = "_") %>% 
+  column_to_rownames(var = "tax") %>% 
+  data.frame
+# Perform CLR
+gr_taxa2_clr_df <- as.data.frame(clr(gr_taxa2_clr))
+# Reformat CLR data
+gr_taxa2_clr_df_mod <- gr_taxa2_clr_df %>% 
+  rownames_to_column(var = "tax") %>% 
+  separate(tax, c("Broad_Taxa", "Taxa2"), sep = "_") %>% 
+  pivot_longer(cols = starts_with(c("Cosmopolitan", "Resident")), values_to = "CLR") %>% 
+  separate(name, c("RES_COSMO", "SAMPLE_TMP"), sep = "_") %>% 
+  mutate(SAMPLE = gsub("\\.", " ", SAMPLE_TMP)) %>% 
+  select(-SAMPLE_TMP) %>% 
+  data.frame
+
+# Perform second series of data re-formatting
+gr_relAbun_toheat <- gr_relAbun_toheat_ONE %>% 
+  group_by(Broad_Taxa) %>%
+  mutate(SUM_BROAD_TAXA = sum(SUM_TAXA2),
+         RelAbun_Broad_Taxa = (100*(SUM_TAXA2/SUM_BROAD_TAXA))) %>%
+  ungroup() %>%
+  group_by(Taxa2) %>%
+  mutate(SUM_ALL_TAXA2 = sum(SUM_TAXA2),
+         RelAbun_Taxa2 = (100*(SUM_TAXA2/SUM_ALL_TAXA2))) %>%
+  select(-Broad_Taxa) %>%  #Temporarily remove
+  # Artifically match with expanded columns to include complete dataset
+  right_join(expand_tmp) %>%
+  # Re-join with taxonomic information and replace NAs with zeroes
+  left_join(tax_key) %>%
+  left_join(gr_taxa2_clr_df_mod) %>% 
+  replace(is.na(.), 0) %>%
+  # Need to replace TRUE zero with NA in CLR column
+  mutate(CLR = ifelse(
+    SUM_TAXA2 == 0, NA, CLR
+  )) %>% 
+  separate(SAMPLE, c("locale", "site", "type"), sep = " ", remove = FALSE) %>% 
+  select(-site, -type) %>% 
+  data.frame
+# View(gr_relAbun_toheat)
+```
+
+```{r Factor for tile plot}
+# Re-factor
+tax2_order_all <- c("Colpodea","Heterotrichea","Karyorelictea","Litostomatea","Nassophorea","Oligohymenophorea","Phyllopharyngea","Plagiopylea","Prostomatea","Spirotrichea-Choreotrichida","Spirotrichea-Euplotia","Spirotrichea-Hypotrichia","Spirotrichea-Other","Spirotrichea-Strombidiida","Spirotrichea-Tintinnida","Ciliates-Other","Gonyaulacales","Gymnodiniales","Noctilucales","Peridiniales","Prorocentrales","Suessiales","Torodiniales","Apicomplexa","Syndiniales Dino-Groups (I-V)","Alveolata-Other","Amoebozoa","Breviatea","Lobosa","Apusomonadidae","Apusozoa","Hilomonadea","Mantamonadidea","Discoba","Metamonada","Hacrobia-Cryptophyta","Hacrobia-Haptophyta","Centroheliozoa","Katablepharidophyta","Picozoa","Telonemia","Hacrobia-Other","Archaeplastida-Chlorophyta","Archaeplastida-Streptophyta","Archaeplastida-Other","Ascomycota","Basidiomycota","Chytridiomycota","Microsporidiomycota","Opisthokonta-Fungi","Annelida","Arthropoda","Cnidaria","Craniata","Ctenophora","Echinodermata","Gastrotricha","Mollusca","Nematoda","Nemertea","Opisthokonta-Metazoa","Platyhelminthes","Porifera","Rotifera","Urochordata","Choanoflagellatea","Filasterea","Ichthyosporea","Opisthokonta-Other","Endomyxa","Filosa","Filosa-Granofilosea","Filosa-Imbricatea","Filosa-Sarcomonadea","Filosa-Thecofilosea","Rhizaria-Cercozoa","Polycystinea-Collodaria","Polycystinea-Nassellaria","Polycystinea-Spumellarida","RAD-A","RAD-B","RAD-C","Rhizaria-Acantharea","Rhizaria-Radiolaria","Rhizaria-Other","MAST","Bacillariophyta","Bolidophyceae","Chrysophyceae","Dictyochophyceae","MOCH","Pelagophyceae","Synurophyceae","Caecitellaceae", "Cafeteriaceae","Stramenopiles-Other","Unassigned-Eukaryote")
+gr_relAbun_toheat$TAXA2_ORDER <- factor(gr_relAbun_toheat$Taxa2, levels = rev(tax2_order_all))
+
+broad_taxa_order <- c("Alveolata-Ciliates","Alveolata","Rhizaria",
+                      "Stramenopiles","Amoebozoa","Apusozoa",
+                      "Excavata","Hacrobia","Archaeplastida",
+                      "Opisthokonta","Unassigned-Eukaryote")
+
+gr_relAbun_toheat$Broad_ORDER <- factor(gr_relAbun_toheat$Broad_Taxa, levels = broad_taxa_order)
+
+# Factor sample order
+gr_relAbun_toheat$SAMPLENAME<-factor(gr_relAbun_toheat$SAMPLE, levels = sample_order_all, labels = sample_name_all)
+# head(gr_relAbun_toheat)
+```
+
+```{r tile plot code, fig.width=8, fig.height=10}
+# Make geom tile plot relative abundance
+
+tile_tax <- ggplot(gr_relAbun_toheat, aes(x = SAMPLENAME, 
+                                          fill = RelAbun_Taxa2, 
+                                          y = TAXA2_ORDER)) +
+    geom_tile(color = "white") +
+    theme(legend.position = "right",
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.border = element_blank(),
+          panel.background = element_blank(),
+          axis.text.x = element_text(angle=90, hjust=1, vjust=0.5, color = "black", size = 8),
+          axis.text.y = element_text(color="black", size = 8),
+          strip.background = element_blank(),
+          strip.text.y = element_text(hjust = 1, vjust = 0.5, angle = 0),
+          strip.text.x = element_blank(),
+          legend.title = element_blank()) +
+    labs(x="", y="")+
+    facet_grid(Broad_ORDER ~ RES_COSMO, space = "free", scales = "free")
+# ?geom_tile
+
+# Richness plot
+# bubble plot richness
+richness_plot <- gr_relAbun_toheat %>% 
+  filter(RelAbun_Taxa2 > 0) %>% 
+  ggplot(aes(x = RES_COSMO, y = TAXA2_ORDER)) +
+    geom_point(aes(size = RICHNESS_TAXA2)) +
+    scale_size_continuous(range = c(0.1, 5)) +
+    facet_grid(Broad_ORDER~RES_COSMO, space = "free", scales = "free") +
+    theme(legend.position = "right",
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.border = element_blank(),
+          panel.background = element_blank(),
+          axis.text.x = element_text(angle = 90, size = 8),
+          axis.text.y = element_text(size = 8),
+          strip.text = element_blank(),
+          strip.background = element_blank()) +
+    labs(x="", y="") +
+  guides(size = guide_legend(title = "Total ASVs")) +
+  coord_cartesian(clip = "off") 
+# richness_plot
+```
+
+```{r Tile plot code for CLR}
+tile_tax_CLR <- ggplot(gr_relAbun_toheat, aes(x = SAMPLENAME, 
+                                          fill = CLR, 
+                                          y = TAXA2_ORDER)) +
+    geom_tile(color = "#bdbdbd") +
+    theme(legend.position = "right",
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.border = element_blank(),
+          panel.background = element_blank(),
+          axis.text.x = element_text(angle=90, hjust=1, vjust=0.5, color = "black", size = 8),
+          axis.text.y = element_text(color="black", size = 8),
+          strip.background = element_blank(),
+          strip.text.y = element_text(hjust = 0, vjust = 0.5, angle = 0),
+          strip.text.x = element_text(hjust = 0, vjust = 0.5, angle = 0)) +
+    labs(x="", y="")+
+    facet_grid(Broad_ORDER ~ RES_COSMO, 
+               space = "free", scales = "free")
+```
+
+```{r Tile plot with CLR, fig.height=8, fig.width=16}
+
+one <- c("#a50026","#d73027","#f46d43","#fdae61","#fee090","#e0f3f8","#abd9e9","#74add1","#4575b4","#313695")
+two <- c("#8e0152","#c51b7d","#de77ae","#f1b6da","#f7f7f7","#b8e186","#7fbc41","#4d9221","#276419")
+# svg("figs/Tileplot-CLR-15-01-2021.svg", h = 8, w = 16)
+plot_grid(
+  tile_tax_CLR %+% subset(gr_relAbun_toheat, RelAbun_Taxa2 > 0) +
+  scale_fill_gradientn(colors = rev(two), na.value = NA),
+  richness_plot, ncol = 2, axis = c("tb"), align = c("hv"))
+# dev.off()
+
+# Get legend
+# legend_clr <- get_legend(tile_tax_CLR %+% subset(gr_relAbun_toheat, RelAbun_Taxa2 > 0) +
+# scale_fill_gradientn(colors = rev(two), na.value = NA))
+# svg("figs/legend-tileplot.svg", h=5, w=5)
+# tile_tax_CLR %+% subset(gr_relAbun_toheat, RelAbun_Taxa2 > 0) +
+#   scale_fill_gradientn(colors = rev(two), na.value = NA)
+# dev.off()
+# plot_grid(legend_clr)
+```
+
+## Supplementary plots
+
+Repeat high-resolution look at protistan biogeography, but without ciliate groups.
+
+
+### ID most abundant ASVs
+```{r, warning=FALSE, message=FALSE}
+# What are the most abundant ASVs in each of the taxa2 categories?
+# head(gr_tax_res)
+gr_topASV_taxa2 <- gr_tax_res %>% 
+    select(Feature.ID, RES_COSMO = DIST_simple, Taxa, Taxa2, Taxon_updated, COUNT_AVG) %>%
+    group_by(Feature.ID, RES_COSMO, Taxa, Taxa2, Taxon_updated) %>% 
+    summarise(Total = sum(COUNT_AVG)) %>% 
+    ungroup() %>% 
+    group_by(Taxa, Taxa2) %>%
+    arrange(Taxa2, desc(Total)) %>% 
+    top_n(10, Total) %>% 
+    data.frame
+# gr_topASV_taxa2
+# write_delim(gr_topASV_taxa2, path = "supptable-topASVs-taxa2.txt", delim = "\t")
+# save(gr_tax_res, file = "GR-18S-ASV-list.RData")
+```
+
+
+# Process 16S tag-sequences
+
+Import 16S tag-sequence results (ASV table). Import metadata, modify sample names, and conduct taxonomic curation.
+
+```{r Import reads and metadata}
+# Import metadata for 16S
+ventnames_16 <- read.delim("data-input/ventnames-gordaridge-16S.txt")
+# View(ventnames_16)
+ventnames_16_mod <- ventnames_16 %>% 
+    mutate(location = case_when(
+      grepl("NA108001", SAMPLEID_16S) ~ "NearVent",
+      grepl("NA108036", SAMPLEID_16S) ~ "Plume",
+      grepl("NA108096", SAMPLEID_16S) ~ "Plume",
+      grepl("BSW", SAMPLE_AMY) ~ "BSW", 
+      grepl("Vent", LocationName) ~ "Vent"),
+          NA_NUM = SAMPLEID_16S) %>% 
+    mutate(NA_NUM = str_replace(NA_NUM, "NA108", "")) %>%
+    mutate(NA_NUM = str_replace(NA_NUM, "NA080", "")) %>% 
+    mutate(NA_NUM = str_replace(NA_NUM, "aSTEP", "")) %>% 
+    mutate(NA_NUM = str_replace(NA_NUM, "bSTEP", "")) %>% 
+    mutate(NA_NUM = str_replace(NA_NUM, "STEP20200226", "")) %>% 
+    mutate(NA_NUM = str_replace(NA_NUM, "STEP", "")) %>% 
+    unite(NEW_SAMPLEID, location, NA_NUM, sep ="") %>% 
+    mutate(LocationName = case_when(
+      grepl("NearVent", NEW_SAMPLEID) ~ "Near vent BW",
+      NEW_SAMPLEID == "Plume036" ~ "Candelabra Plume",
+      NEW_SAMPLEID == "Plume096" ~ "Mt Edwards Plume",
+    grepl("SirVentsAlot", LocationName) ~ "Sir Ventsalot",
+    TRUE ~ as.character(LocationName)
+    )) %>%
+    data.frame
+# View(ventnames_16_mod)
+countbac <- read.delim("data-input/CountTable-wtax-16s-plus3-2020-06-23.txt")
+
+# Remove samples that were repeated
+rm <- c("NA108003STEP", "NA108039STEP", "NA108087STEP")
+```
+
+Report stats on 16S tag-sequence data.
+```{r Stats on original 16S data}
+tmp <- countbac %>%
+  select(-all_of(rm)) %>% 
+  pivot_longer(starts_with("NA"), names_to = "SAMPLEID_16S") %>% 
+  left_join(ventnames_16_mod) %>% 
+  data.frame
+sum(tmp$value) # total sequences
+length(unique(tmp$Feature.ID)) # Total ASVs
+```
+
+## Format 16S ASV table for plotting
+```{r format plot for plotting, message=FALSE, warning=FALSE}
+bac_df_plot <- countbac %>%
+  separate(Taxon, sep = ";D_[[:digit:]]__", into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), remove = TRUE, extra = "merge") %>% # Warnings are OK with NAs
+  mutate_if(is.character, str_replace_all, pattern = "D_0__", replacement = "") %>%
+  filter(Domain %in% "Archaea" | Domain %in% "Bacteria") %>% #Select only archaea and bacteria, removing unassigned
+  select(-all_of(rm)) %>% # Remove samples we are replacing
+  pivot_longer(starts_with("NA"), names_to = "SAMPLEID_16S") %>% 
+  left_join(ventnames_16_mod) %>% 
+  data.frame
+# head(bac_df_plot)
+```
+```{r Get stats after quality control}
+# head(bac_df_plot)
+sum(bac_df_plot$value) # total sequences
+length(unique(bac_df_plot$Feature.ID)) # total ASVs
+```
+
+### Subset 16S ASVs by abundance
+```{r subset to include abundant ASVs}
+bac_df_filtered <- bac_df_plot %>% 
+  ungroup() %>% 
+  mutate(TOTALSEQ = sum(value)) %>% 
+  group_by(Feature.ID) %>% 
+    summarise(SUM = sum(value),
+             RELABUN = SUM/TOTALSEQ) %>%
+  filter(RELABUN >= 0.001) %>% 
+  add_column(KEEP = "YES") %>% 
+  right_join(bac_df_plot) %>% 
+  filter(KEEP == "YES") %>% 
+  data.frame
+```
+
+## Curate 16S taxonomic assignment
+Here we are curating the 16S taxonomy assignments so we can get an informative look at the in situ bacteria population diversity and biogeography. Places ASVs below a user designated _THRESHOLD_ into the "Other" category - ASVs that make up < X% of the total data set. For this work, a threshold of 0.1% was used. The other curation of taxonomic assignment was to highlight those groups known to inhabit the region or other chemosynthetic habitats.
+
+### Function to modify 16S taxonomy
+```{r Curate 16S taxonomy - function}
+# Add a column for updated taxonomy name
+curate_16s_tax <- function(df, THRESHOLD){
+  # List the class and genus level designations that should be named at class level
+  class <- c("Alphaproteobacteria", "Deltaproteobacteria", "Gammaproteobacteria", "Nitrososphaeria", "Thermoplasmata")
+  genus <- c("Arcobacter","Campylobacter","Hydrogenimonas","Nitratiruptor","Nitratifractor","Sulfurovum","Sulfurimonas","Caminibacter", "Psychrilyobacter", "SUP05 cluster")
+  # List the appropriate taxonomic names for this whole level to be placed into "Other" category
+  class_other <- c("Verrucomicrobiae")
+  phylum_other <- c("Planctomycetes", "Poribacteria", "Cyanobacteria", "WPS-2")
+  order_other <- c("Synechococcales")
+  totalsumseq <- sum(df$value) # total number of sequences
+  tmp_filter <- df %>% 
+    group_by(Feature.ID) %>% 
+    summarise(SUM = sum(value)) %>% 
+    mutate(RELABUN = 100*(SUM/totalsumseq)) %>% 
+    filter(RELABUN >= THRESHOLD) %>% #User-defined relabun threshold
+    data.frame
+  keep_asvs_relabun <- as.character(unique(tmp_filter$Feature.ID))
+  df2 <- df %>%
+    mutate(Tax_update = Phylum) %>% # Default to filling new taxa level to phylum
+    mutate(Tax_update = ifelse(Feature.ID %in% keep_asvs_relabun, Tax_update, "Other"), # Change name to other if it falls below relative abundance Threshold
+           Tax_update = ifelse(Class %in% class, paste(Phylum, Class, sep = "-"), Tax_update),
+           Tax_update = ifelse(Order == "Methylococcales", paste(Phylum, "Methylococcales", sep = "-"), Tax_update),
+           Tax_update = ifelse(Order == "Oceanospirillales", paste(Phylum, "Oceanospirillales", sep = "-"), Tax_update),
+           Tax_update = ifelse(Order == "Thioglobaceae", paste(Phylum, "Thioglobaceae", sep = "-"), Tax_update),
+           Tax_update = ifelse(Family == "Nitrospinaceae", paste(Phylum, "Nitrospinaceae", sep = "-"), Tax_update),
+           Tax_update = ifelse(Class %in% class_other, "Other", Tax_update),
+           Tax_update = ifelse(Phylum %in% phylum_other, "Other", Tax_update),
+           Tax_update = ifelse(Order %in% order_other, "Other", Tax_update),
+           Tax_update = ifelse(Genus %in% genus, paste(Phylum, Genus, sep = "-"), Tax_update))
+   return(df2)
+}
+```
+Removal of known Kitome contamination.
+```{r Modify 16S data}
+# head(bac_df_plot) # Add updated taxa list to this dataframe
+# unique(bac_df_plot$LocationName)
+bac_wcuratedtax <- curate_16s_tax(bac_df_plot %>% 
+  filter(!(Genus == "Ralstonia")), 0.1) #Will place ASVs <0.1% abundance into "Other category"
+# unique(bac_wcuratedtax$Tax_update)
+# length(unique(bac_wcuratedtax$Tax_update))
+tax_16s <- bac_wcuratedtax %>% 
+  select(Tax_update, Domain:Species) %>% 
+  distinct()
+# write_delim(tax_16s, path = "tax-key-16s-21-08-2020.txt", delim = "\t")
+```
+
+
+```{r Average across and save}
+# Average sequence count for ASVs across replicates (by location name)
+## Save output dataframe
+bac_gr_avg <- bac_wcuratedtax %>% 
+  # Average ASV seq count across replicates
+  group_by(Feature.ID, LocationName, Tax_update) %>% 
+  summarise(AVG_count = mean(value)) %>% 
+  data.frame
+# write_delim(bac_gr_avg, path = "data-input/16s-gr-data-curated-avg.txt", delim = "\t")
+```
+
+## Prepare 16S dataframe for plotting
+### Average across replicates and sum to taxa
+```{r 16S taxonomy average and summary, warning=FALSE, message=FALSE}
+# update exisiting taxonomy
+bac_wcuratedtax_toplot <- bac_wcuratedtax %>% 
+  # Average ASV seq count across replicates
+  group_by(Feature.ID, LocationName, Tax_update) %>% 
+  summarise(AVG_count = mean(value)) %>% 
+  ungroup() %>% 
+  group_by(LocationName, Tax_update) %>% 
+  summarise(SUM_bytax = sum(AVG_count)) %>% 
+  data.frame
+
+# unique(bac_wcuratedtax_toplot$LocationName)
+bac_wcuratedtax_toplot$LOCATION <- factor(bac_wcuratedtax_toplot$LocationName, levels = c("Shallow seawater", "Deep seawater", "Near vent BW","Mt Edwards Plume", "Mt Edwards Vent", "Venti Latte Vent", "Sir Ventsalot", "Candelabra Plume", "Candelabra Vent", "Purple Rain Vent", "Octopus Springs Vent", "Blue Ciliate"))
+```
+
+### Generate 16S bar plots
+```{r 16S barplot}
+tax_color<-c("#a50026","#d73027","#f46d43","#fdae61","#fee090","#ffffbf","#40004b","#762a83","#9970ab","#c2a5cf","#e7d4e8","#d9f0d3","#a6dba0","#5aae61","#1b7837","#00441b","#e0f3f8","#abd9e9","#74add1","#4575b4","#313695","#8e0152","#c51b7d","#de77ae","#f1b6da","#fde0ef","#e6f5d0","#b8e186","#7fbc41","#4d9221","#276419","#bababa","#878787","#4d4d4d","#1a1a1a")
+tax_order <- c("Epsilonbacteraeota-Arcobacter","Epsilonbacteraeota-Caminibacter","Epsilonbacteraeota-Campylobacter","Epsilonbacteraeota-Hydrogenimonas","Epsilonbacteraeota-Nitratifractor","Epsilonbacteraeota-Nitratiruptor","Epsilonbacteraeota-Sulfurimonas","Epsilonbacteraeota-Sulfurovum","Proteobacteria-Alphaproteobacteria","Proteobacteria-Deltaproteobacteria","Proteobacteria-Gammaproteobacteria","Proteobacteria-Methylococcales","Proteobacteria-Oceanospirillales","Proteobacteria-SUP05 cluster","Acidobacteria","Actinobacteria","Aquificae","Bacteroidetes","Chloroflexi","Thaumarchaeota-Nitrososphaeria","Euryarchaeota-Thermoplasmata","Fusobacteria-Psychrilyobacter","Marinimicrobia (SAR406 clade)","Nitrospinae-Nitrospinaceae","Other")
+
+bac_wcuratedtax_toplot$TAX_ORDER <- factor(bac_wcuratedtax_toplot$Tax_update, levels = tax_order)
+
+barplot_16s <- function(df){
+  ggplot(df, aes(x = LOCATION, y = SUM_bytax, fill = TAX_ORDER)) +
+    geom_bar(stat = "identity", position = "fill", color = "black") +
+    scale_fill_manual(values = tax_color) +
+    scale_y_continuous(expand = c(0,0)) +
+    theme(legend.position = "right",
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.border = element_blank(),
+          panel.background = element_blank(),
+          axis.text.x = element_text(angle = 90, hjust=1, vjust=0.5, color = "black", face="bold", size = 12),
+          axis.text.y = element_text(color = "black", face="bold", size = 12),
+          strip.text = element_blank(),
+          legend.title = element_blank()) +
+    labs(x="", y="Relative abundance") +
+    facet_grid(.~LOCATION, space = "free", scales = "free") +
+    guides(fill=guide_legend(ncol=1))
+}
+```
+
+```{r Plot 16S, fig.height=7, fig.width=8}
+rm_loc <- c("Purple Rain Vent", "Octopus Springs Vent", "Blue Ciliate")
+
+# svg("16s-curated-static.svg", h=8, w=8)
+barplot_16s(bac_wcuratedtax_toplot %>% filter(!(LOCATION %in% rm_loc)))
+# dev.off()
+```
+
+```{r View 16S ASVs}
+# head(bac_wcuratedtax)
+# Average ASV seq count across replicates
+# tmp <- bac_wcuratedtax %>%
+#   group_by(Feature.ID, Order, Family, Genus, Species, LocationName, Tax_update) %>%
+#   summarise(AVG_count = mean(value)) %>%
+#   filter(!(LocationName %in% rm_loc)) %>% 
+#   filter(!(LocationName == "Near vent BW")) %>% 
+#   filter(!(grepl("Plume", LocationName))) %>% 
+#   data.frame
+# 
+# unique(bac_wcuratedtax$LocationName)
+```
+
+### Data transformation-Jaccard
+Ordination analysis for 16S results.
+```{r Transform for ordination}
+# head(bac_wcuratedtax)
+rm_loc <- c("Purple Rain Vent", "Octopus Springs Vent", "Blue Ciliate")
+
+bac_df_num <- bac_wcuratedtax %>% 
+  type.convert(as.is = TRUE) %>%
+  filter(!LocationName %in% rm_loc) %>% 
+  unite(SAMPLENAME, LocationName, SAMPLEID, NEW_SAMPLEID,SAMPLEID_16S, sep = "-") %>% 
+  select(Feature.ID, SAMPLENAME, value) %>%
+  pivot_wider(names_from = SAMPLENAME,
+              values_from = value,
+              values_fill = 0) %>%
+  column_to_rownames(var = "Feature.ID") %>% 
+  as.matrix
+# head(bac_df_num)
+```
+
+
+```{r CLR transform, fig.height=4, fig.width=5}
+library(compositions)
+df_log_clr <- data.frame(clr(t(bac_df_num)))
+
+# # Ordination - PCA
+# # ?prcomp()
+pca_clr <- prcomp(df_log_clr)
+
+# # Check variance
+check_variance <- (pca_clr$sdev^2)/sum(pca_clr$sdev^2)
+# head(check_variance)
+# # Screeplot, how many axes are appropriate?
+barplot(check_variance,
+        main='Log-Ratio PCA Screeplot',
+        xlab='PC Axis',
+        ylab='% Variance',
+        cex.names=1.5,cex.axis=1.5,cex.lab=1.5,cex.main=1.5)
+```
+
+```{r Add metadata}
+# Convert to dataframe and parse metadata
+df_pca_clr <- data.frame(pca_clr$x, SAMPLENAME = rownames(pca_clr$x))
+# head(df_pca_clr)
+df_pca_clr_wnames <- df_pca_clr %>%
+  separate(SAMPLENAME, c("LocationName", "Sampletype", "SAMPLEID", "Fastq"), sep = "-") %>% 
+  data.frame
+# head(df_pca_clr_wnames)
+unique(df_pca_clr_wnames$LocationName)
+```
+
+### Plot 16S PCA
+
+```{r 16S PCA factoring}
+# Factor for plotting
+# sample_order_all_16s <- c("Shallow seawater","Deep seawater","Plume","Near vent BW","Mt Edwards Vent","Venti Latte Vent","Candelabra Vent","Sir Ventsalot")
+sample_order_all_16s <- c("Candelabra Vent","Mt Edwards Vent","Sir Ventsalot","Venti Latte Vent","Deep seawater","Shallow seawater","Near vent BW","Candelabra Plume","Mt Edwards Plume")
+# sample_color_all <-c("#bfbbb0","#413f44","#7d8c55","#6f88af","#61ac86","#711518","#dfa837","#ce536b")
+sample_color_all <- c("#dfa837","#61ac86","#ce536b","#711518","#413f44","#bfbbb0","#6f88af","#dfa837","#61ac86")
+names(sample_color_all) <- sample_order_all_16s
+shapes <- c(21, 21, 21, 21, 22, 22, 23, 24, 24)
+df_pca_clr_wnames$SAMPLE_ORDER <- factor(df_pca_clr_wnames$LocationName, levels = sample_order_all_16s)
+
+```
+ 
+```{r format for plot, warning=FALSE, message=FALSE, fig.height=5, fig.width=6.5}
+# svg("PCoA-16S-wolabels.svg", h = 8, w = 8)
+pca_16s <- ggplot(df_pca_clr_wnames, aes(x = PC1, y = PC2, fill = SAMPLE_ORDER, shape = SAMPLE_ORDER, color = SAMPLE_ORDER)) +
+  geom_point(aes(x = PC1,y = PC2, fill = SAMPLE_ORDER, shape = SAMPLE_ORDER, color = SAMPLE_ORDER), size = 4) +
+  scale_fill_manual(values = sample_color_all) +
+  scale_color_manual(values = sample_color_all) +
+  scale_shape_manual(values = shapes) +
+  ylab(paste0('PC2 ',round(check_variance[2]*100,2),'%')) +
+  xlab(paste0('PC1 ',round(check_variance[1]*100,2),'%')) +
+  ggtitle('16S - CLR PCA Ordination') +
+  theme_bw() +
+  theme(axis.text = element_text(color = "black", size = 12),
+        legend.title = element_blank()) +
+  geom_hline(yintercept = 0) + geom_vline(xintercept = 0)
+
+# pca_16s
+```
+
+```{r Plot panel 16s, fig.height=8, fig.width=19}
+# svg("figs/16s-panel-supplementary.svg", w=16, h=8)
+plot_grid(
+  barplot_16s(bac_wcuratedtax_toplot %>% filter(!(LOCATION %in% rm_loc))),
+  pca_16s, axis = c("tblr"), align = c("hv"),
+          labels = c("a", "b"))
+# dev.off()
+```
+
+# Correlation analysis: 18S-16S
+Use these ASVs downstream to explore hypotheses with correlation results. Below set up 16S and 18S rRNA gene output data as phyloseq objects to import into SPIEC-EASI. Following SPIEC-EASI analysis, export as dataframe, add metadata, and process. 
+
+## Prepare 16S and 18S data for correlation analysis:
+Format input 18S and 16S data, save for correlation analysis.
+```{r load 16S and 18S data}
+# load 18S data
+load("data-input/GR-countinfo-withASVdistribution.RData", verbose=T)
+# head(gr_stats_wtax)
+# load 16S data, this has been averaged across replicates
+bac_wtax <- read.delim("data-input/16s-gr-data-curated-avg.txt")
+```
+
+```{r Select equivalent locations for 16S and 18S}
+# unique(gr_stats_wtax$LocationName)
+# unique(bac_wtax$LocationName)
+
+rm_loc <- c("Purple Rain Vent", "Octopus Springs Vent", "Blue Ciliate")
+bac_wtax_mod <- bac_wtax %>% 
+  filter(!(LocationName %in% rm_loc)) %>% 
+  mutate(LocationName = case_when(
+    LocationName == "Sir Ventsalot" ~ "SirVentsAlot Vent",
+    TRUE ~ as.character(LocationName)
+  ))
+  
+# unique(gr_stats_wtax$LocationName)
+# unique(bac_wtax_mod$LocationName)
+```
+
+
+```{r Sort and filter eukaryote ASVs to consider}
+# Sort and filter eukaryote ASVs to consider:
+sumseq <- sum(gr_stats_wtax$COUNT_AVG)
+metaz <- c("Opisthokonta-Fungi", "Opisthokonta-Other", "Opisthokonta-Metazoa")
+# head(gr_stats_wtax)
+euk_data_interact <- gr_stats_wtax %>%
+  type.convert(as.is = TRUE) %>%
+  filter(Sampletype == "in situ") %>% #select only in situ samples
+  filter(!Taxa %in% metaz) %>% 
+  filter(!Taxa == "Unassigned-Eukaryote") %>% 
+  select(Feature.ID, Taxon_updated, COUNT_AVG, LocationName) %>% 
+  group_by(Feature.ID, Taxon_updated, LocationName) %>% 
+  summarise(COUNT_TOTAL = sum(COUNT_AVG)) %>% 
+  ungroup() %>% 
+  # Calculate relative abundance
+  mutate(RelAbun = 100*(COUNT_TOTAL/sumseq)) %>% 
+  # Remove ASVs ahead of network analysis
+  group_by(Feature.ID) %>% 
+  filter(RelAbun > 0.001) %>%
+  mutate(sample_appear = n_distinct(LocationName)) %>% #Calculate how many times an ASV appears
+  filter(sample_appear > 3) %>% #ASV must appear in at least 3 samples
+  filter(COUNT_TOTAL >= 50) %>% #ASV must have at least 10 sequences
+  add_column(domain = "euk") %>%
+  unite(FEATURE, domain, Feature.ID, sep = "_", remove = TRUE) %>% 
+  select(FEATURE, LocationName, Taxon_EUK = Taxon_updated, COUNT = COUNT_TOTAL) %>% 
+  data.frame
+
+length(unique(gr_stats_wtax$Feature.ID)); length(unique(euk_data_interact$FEATURE))
+# View(euk_data_interact)
+# head(euk_data_interact)
+```
+
+```{r Sort and filter bacteria and archaea ASVs to consider}
+sumseq <- sum(bac_wtax_mod$AVG_count)
+locations_gr <- unique(gr_stats_wtax$LocationName)
+
+bac_data_interact <- bac_wtax_mod %>% 
+  filter(LocationName %in% locations_gr) %>% 
+  filter(!(Tax_update == "Other")) %>% #Remove "other"
+  group_by(Feature.ID, Tax_update, LocationName) %>% 
+  summarise(COUNT_TOTAL = sum(AVG_count)) %>% 
+  ungroup() %>% 
+  add_column(domain = "prok") %>% 
+  # Calculate relative abundance
+  mutate(RelAbun = 100*(COUNT_TOTAL/sumseq)) %>% 
+  # Remove ASVs ahead of network analysis
+  group_by(Feature.ID) %>% 
+  filter(RelAbun > 0.001) %>%
+  mutate(sample_appear = n_distinct(LocationName)) %>% #Calculate how many times an ASV appears
+  filter(sample_appear > 3) %>% #ASV must appear in at least 3 samples
+  filter(COUNT_TOTAL >= 50) %>% #ASV must have at least 10 sequences
+  unite(FEATURE, domain, Feature.ID, sep = "_", remove = TRUE) %>% 
+  select(FEATURE, LocationName, Taxon_BAC = Tax_update, COUNT = COUNT_TOTAL) %>% 
+  data.frame
+
+length(unique(bac_wtax$Feature.ID)); length(unique(bac_data_interact$FEATURE))
+```
+
+```{r Save these objects}
+save(euk_data_interact, bac_data_interact, file = "data-input/Filtered-correlation-R-objects-10-11-2020.RData")
+```
+
+### Import as phyloseq objects
+
+```{r Import euk data into phyloseq}
+euk_df <- euk_data_interact %>% 
+  pivot_wider(names_from = LocationName, values_from = COUNT, values_fill = 0) %>% 
+  select(order(colnames(.))) %>% 
+  data.frame
+# head(euk_df)
+
+euk_asv <- as.matrix(select(euk_df, -Taxon_EUK) %>% column_to_rownames(var = "FEATURE"))
+euk_tax <- as.matrix(select(euk_df, FEATURE, Taxon_EUK) %>% column_to_rownames(var = "FEATURE"))
+# head(bac_asv); head(bac_tax)
+row.names(euk_asv) <- row.names(euk_tax)
+
+# Phyloseq import
+euk_asv_table <- otu_table(euk_asv, taxa_are_rows = TRUE)
+euk_tax_table <- tax_table(euk_tax)
+euk_phy <- phyloseq(euk_asv_table, euk_tax_table)
+euk_phy
+```
+
+
+```{r Repeat phyloseq import for 16S data}
+
+bac_df <- bac_data_interact %>% 
+  pivot_wider(names_from = LocationName, values_from = COUNT, values_fill = 0) %>% 
+  select(order(colnames(.))) %>%
+  data.frame
+
+bac_asv <- as.matrix(select(bac_df, -Taxon_BAC) %>% column_to_rownames(var = "FEATURE"))
+bac_tax <- as.matrix(select(bac_df, FEATURE, Taxon_BAC) %>% column_to_rownames(var = "FEATURE"))
+# head(bac_asv); head(bac_tax)
+row.names(bac_asv) <- row.names(bac_tax)
+
+# Phyloseq import
+bac_asv_table <- otu_table(bac_asv, taxa_are_rows = TRUE)
+bac_tax_table <- tax_table(bac_tax)
+bac_phy <- phyloseq(bac_asv_table, bac_tax_table)
+bac_phy
+```
+
+```{r Save phyloseq objects}
+# save phyloseq objects to run SpiecEasi in another script
+save(bac_phy, euk_phy, file = "data-input/phyloseq-18s-16s-12-11-2020.RData")
+# save(bac_phy_tmp, euk_phy_tmp, file = "phyloseq-18s-16s-TMP.RData")
+# ?spiec.easi
+```
+
+## SpiecEasi
+
+### Run SpiecEasi
+
+Run SpiecEasi separately and import output tables to filter significant interactions.
+
+> Below command was run on an HPC, while other commands can be run locally. Save output and bring locally below.
+
+```{r SpiecEasi Commands}
+# library(SpiecEasi)
+# ?spiec.easi
+## Cross Domain approach
+# se_GR <- spiec.easi(list(bac_phy, euk_phy), method = "mb",
+#                     nlambda = 40, lambda.min.ratio = 1e-2,
+#                     pulsar.params = list(thresh = 0.05))
+
+## Check output
+# getStability(se_GR)
+# sum(getRefit(se_GR))/2
+
+## Extract weighted matrix
+# se.beta <- as.matrix(symBeta(getOptBeta(se_GR))) 
+# df_beta <- as.data.frame(se.beta)  
+
+## Extract adajency matrix
+# adj.mat <- getRefit(se_GR) 
+# df_adj <- as.data.frame(as.matrix(adj.mat))
+
+## Assign names from original dataframes
+# colnames(df_beta) <- colnames(se_GR$est$data)
+# colnames(df_adj) <- colnames(se_GR$est$data) 
+# row.names(df_adj) <- colnames(se_GR$est$data)
+# row.names(df_beta) <- colnames(se_GR$est$data)     
+
+## Save output
+# save(df_adj, df_beta, se_GR, file = "gr-spieceasi-output-20-08-2020.RData")
+
+```
+
+### Process SpiecEasi output
+Transform into dataframes to look at relationship of pairs
+```{r Import spieceasi output}
+# From SPEIC-EASI output run on HPC, import results:
+load("data-input/gr-spieceasi-dfs-12-11-2020.RData", verbose = T)
+load("data-input/gr-spieceasi-objs-12-11-2020.RData", verbose = T)
+# head(df_adj)
+# colnames(df_adj)
+# head(euk_data_interact)
+# head(bac_data_interact)
+```
+
+```{r Make taxonomy keys}
+countbac <- read.delim("data-input/CountTable-wtax-16s-plus3-2020-06-23.txt")
+# colnames(countbac)
+bac_data_interact_fulltax <- bac_data_interact %>%
+  select(FEATURE, TAX_SHORT = Taxon_BAC) %>%
+  separate(FEATURE, c("domain", "Feature.ID"), sep = "_", remove = FALSE) %>% 
+  left_join(select(countbac, Feature.ID, TAX_FULL = Taxon)) %>% 
+  select(FEATURE, TAX_FULL, TAX_SHORT) %>% 
+  data.frame
+
+# colnames(gr_stats_wtax)
+# head(gr_tax_res)
+# Make taxonomy key
+tax_key_se <- euk_data_interact %>% 
+  select(FEATURE, TAX_FULL = Taxon_EUK) %>% 
+  separate(FEATURE, c("domain", "Feature.ID"), sep = "_", remove = FALSE) %>%
+  left_join(select(gr_tax_res, Feature.ID, TAX_SHORT = Taxa, EUK_2 = Taxa2, EUK_DIST = DIST_simple)) %>% 
+  select(FEATURE, TAX_FULL, TAX_SHORT, EUK_2, EUK_DIST) %>% 
+  bind_rows(bac_data_interact_fulltax) %>% 
+  distinct() %>% 
+  data.frame
+# View(tax_key_se)
+```
+
+```{r Reformat Spiec Easi output}
+
+reformat_spieceasi <- function(df_in){
+  interaction <- c("PROK-EUK", "EUK-PROK")
+  df_in %>% 
+    rownames_to_column(var = "SIDEA") %>%
+    pivot_longer(cols = starts_with(c("prok", "euk")), names_to = "SIDEB") %>%
+    mutate(domain_a = case_when(
+      grepl("prok", SIDEA) ~ "PROK",
+      grepl("euk", SIDEA) ~ "EUK"),
+    domain_b = case_when(
+      grepl("prok", SIDEB) ~ "PROK",
+      grepl("euk", SIDEB) ~ "EUK")) %>%
+    mutate(COMBO = paste(domain_a, domain_b, sep = "-")) %>%
+    mutate(COMBO_TYPE = case_when(
+      COMBO %in% interaction ~ "cross",
+      TRUE ~ "same"),
+      SIG_ID = paste(SIDEA, SIDEB, sep ="-")) %>%
+    select(-starts_with("domain")) %>% 
+    left_join(select(tax_key_se, TAX_SIDEA = TAX_FULL, everything()), by = c("SIDEA" = "FEATURE")) %>% 
+    left_join(select(tax_key_se, TAX_SIDEB = TAX_FULL, everything()), by = c("SIDEB" = "FEATURE"), suffix = c(".A", ".B")) %>%
+    data.frame
+}
+
+df_adj_long <- reformat_spieceasi(df_adj)
+df_beta_long <- reformat_spieceasi(df_beta_weighted)
+```
+
+### Evaluate statistical parameters determine weight threshold
+Evaluate the range of weighted outputs from SpiecEasi. Determine if a threshold can be set.
+
+```{r Compile significant interactions}
+# Get list of these parameters
+# Adjacency matrix - binary, where 1 = significant interaction
+# Boot strapped pvalue, showing weight of each correlation
+adj_sig <- df_adj_long %>% 
+  filter(value == 1) %>% 
+  filter(COMBO_TYPE == "cross") %>% 
+  select(everything(), Adjacency = value) %>%
+  left_join(select(df_beta_long, SIG_ID, Weight = value)) %>%
+  data.frame
+# colnames(adj_sig)
+dim(adj_sig)
+# head(df_adj_long)
+# table(df_adj_long$value)
+
+dim(adj_sig) # 1074 significant interactions that are cross-domain
+head(adj_sig)
+# Isolate the unique interactions and make a table for export
+complete_list <- adj_sig %>% 
+  filter(COMBO == "EUK-PROK") %>%
+  separate(SIDEA, c("sideA", "ASV_18S"), sep = "_") %>% 
+  separate(SIDEB, c("sideB", "ASV_16S"), sep = "_") %>% 
+  select(-COMBO, -COMBO_TYPE, -SIG_ID, TAX_18S = TAX_SIDEA, TAX_16S = TAX_SIDEB) %>% 
+  data.frame
+# head(complete_list)
+# View(complete_list)
+# write_delim(complete_list, path = "Complete-cross-domain-interactions.txt", delim = "\t")
+
+# Write to visualize in cytoscape
+# write.csv(complete_list, "cross-domain-gr.csv")
+```
+
+
+### Compare relationships at the taxonomic group level
+Of the interactions between 18S- and 16S-derived data, we are interested in capturing the putative predator prey relationships
+
+```{r Retrieve total number of significant interactions}
+tax_sum_interact <- adj_sig %>% 
+  filter(COMBO == "EUK-PROK") %>%
+  separate(SIDEA, c("domain", "ASV_18S"), sep = "_") %>% 
+  separate(SIDEB, c("domain2", "ASV_16S"), sep = "_") %>% 
+  select(-starts_with("domain"), -COMBO, -COMBO_TYPE, -SIG_ID, -Adjacency) %>% 
+  unite(INTERACTION, TAX_SHORT.A, TAX_SHORT.B, sep = "_", remove = FALSE) %>% 
+  add_column(COUNT = 1) %>% 
+  data.frame
+# View(tax_sum_interact)
+length(unique(tax_sum_interact$INTERACTION)) #Total significant interactions between euk and bac
+# table(tax_sum_interact$INTERACTION)
+```
+
+```{r Get interaction summary stats}
+# How many 18S ASVs are involved? what taxonomic groups do the interactions belong to?
+# head(tax_sum_interact)
+unique(tax_sum_interact$TAX_SHORT.A)
+# Table of significant interactions
+summary_sig_interactions <- tax_sum_interact %>% 
+  select(ASV_18S, ASV_16S, TAX_SHORT.A, COUNT) %>% 
+  # distinct() %>%
+  group_by(TAX_SHORT.A) %>% 
+  summarise(UNIQUE_18S_ASVs = n_distinct(ASV_18S),
+            TOTAL_18S_ASVs = sum(COUNT)) %>% 
+  data.frame
+# View(summary_sig_interactions) # Included in Table 2
+
+# Classify interactions to taxa level 2
+summary_sig_interactions_2 <- tax_sum_interact %>% 
+  select(ASV_18S, ASV_16S, TAX_SHORT.A, EUK_2.A, COUNT) %>% 
+  # distinct() %>%
+  group_by(TAX_SHORT.A, EUK_2.A) %>% 
+  summarise(UNIQUE_18S_ASVs = n_distinct(ASV_18S),
+            TOTAL_18S_ASVs = sum(COUNT)) %>% 
+  data.frame
+# View(summary_sig_interactions_2)
+head(tax_sum_interact)
+# Classify interactions to taxa level 2
+summary_sig_interactions_16s <- tax_sum_interact %>% 
+  select(ASV_18S, ASV_16S, TAX_SHORT.B,  COUNT) %>% 
+  # distinct() %>%
+  group_by(TAX_SHORT.B) %>% 
+  summarise(UNIQUE_16S_ASVs = n_distinct(ASV_16S),
+            TOTAL_16S_ASVs = sum(COUNT)) %>% 
+  data.frame
+# View(summary_sig_interactions_16s)
+
+
+# What is the breakdown of bacteria and archaea ASVs?
+head(tax_sum_interact)
+summary_int <- tax_sum_interact %>% 
+  group_by(INTERACTION, EUK_DIST.A) %>% 
+  summarise(TOTAL_INTERACTIONS = sum(COUNT)) %>% 
+  data.frame
+# View(summary_int %>% filter(EUK_DIST.A != "Resident"))
+```
+
+```{r Format interactive}
+head(tax_sum_interact)
+tax_interact_cor <- tax_sum_interact %>% 
+  unite(EUK, TAX_SHORT.A, EUK_2.A, sep = "_", remove = TRUE) %>% 
+  select(EUK, PROK = TAX_SHORT.B, COUNT) %>% 
+  group_by(EUK, PROK) %>% 
+  summarise(SUM_COUNT = sum(COUNT)) %>% 
+  # pivot_wider(names_from = PROK, values_from = COUNT, values_fn = sum, values_fill = 0) %>% 
+  data.frame
+# head(tax_interact_cor)
+table(tax_sum_interact %>% select(EUK_DIST.A))
+```
+
+
+### Plot distribution of interactions
+```{r Prep data ahead of alluvial}
+library(ggalluvial)
+# head(tax_sum_interact)
+# unique(tax_sum_interact$TAX_SHORT.A)
+putative_prey <- tax_sum_interact %>% 
+  # Remove NA
+  filter(!(is.na(TAX_SHORT.B))) %>%
+  group_by(TAX_SHORT.A, TAX_SHORT.B, EUK_DIST.A) %>% 
+  summarise(count_sum = sum(COUNT)) %>% 
+  data.frame
+
+
+level2ORDER <- c("Alveolata-Ciliates","Alveolata-Dinoflagellates","Alveolata-Syndiniales","Alveolata-Other","Rhizaria-Cercozoa","Rhizaria-Radiolaria","Rhizaria-Other","Stramenopiles-MAST","Stramenopiles-Ochrophyta","Stramenopiles-Other","Hacrobia-Cryptophyta","Hacrobia-Haptophyta","Hacrobia-Other","Amoebozoa","Excavata","Apusozoa","Archaeplastida-Chlorophyta","Archaeplastida-Other","Opisthokonta-Fungi","Opisthokonta-Metazoa","Opisthokonta-Other","Unassigned-Eukaryote")
+level2color <- c("#fa9fb5","#d7b5d8","#c994c7","#ce1256","#fc9272","#ef3b2c","#800026","#fff7bc","#fec44f","#d95f0e","#74c476","#238b45","#00441b","#7fcdbb","#084081","#c6dbef","#2b8cbe","#016c59","#bcbddc","#807dba","#54278f","#bdbdbd")
+putative_prey$LEVEL2ORDER <- factor(putative_prey$TAX_SHORT.A, levels=level2ORDER)
+names(level2color)<-level2ORDER
+
+bac_tax_color<-c("#a50026","#d73027","#f46d43","#fdae61","#fee090","#ffffbf","#40004b","#762a83","#9970ab","#c2a5cf","#e7d4e8","#d9f0d3","#a6dba0","#5aae61","#1b7837","#00441b","#e0f3f8","#abd9e9","#74add1","#4575b4","#313695","#8e0152","#c51b7d","#de77ae","#f1b6da","#fde0ef","#e6f5d0","#b8e186","#7fbc41","#4d9221","#276419","#bababa","#878787","#4d4d4d","#1a1a1a")
+bac_tax_order <- c("Epsilonbacteraeota-Arcobacter","Epsilonbacteraeota-Caminibacter","Epsilonbacteraeota-Campylobacter","Epsilonbacteraeota-Hydrogenimonas","Epsilonbacteraeota-Nitratifractor","Epsilonbacteraeota-Nitratiruptor","Epsilonbacteraeota-Sulfurimonas","Epsilonbacteraeota-Sulfurovum","Proteobacteria-Alphaproteobacteria","Proteobacteria-Deltaproteobacteria","Proteobacteria-Gammaproteobacteria","Proteobacteria-Methylococcales","Proteobacteria-Oceanospirillales","Proteobacteria-SUP05 cluster","Acidobacteria","Actinobacteria","Aquificae","Bacteroidetes","Chloroflexi","Thaumarchaeota-Nitrososphaeria","Euryarchaeota-Thermoplasmata","Fusobacteria-Psychrilyobacter","Marinimicrobia (SAR406 clade)","Nitrospinae-Nitrospinaceae","Other")
+putative_prey$TAX_ORDER_BAC <- factor(putative_prey$TAX_SHORT.B, levels = tax_order)
+names(bac_tax_color) <- bac_tax_order
+
+tmp_color <- c("#fa9fb5","#d7b5d8","#c994c7","#ce1256","#fc9272","#ef3b2c","#800026","#fff7bc","#fec44f","#d95f0e","#74c476","#238b45","#00441b","#7fcdbb","#084081","#c6dbef","#2b8cbe","#016c59","#bcbddc","#807dba","#54278f","#bdbdbd","#a50026","#d73027","#f46d43","#fdae61","#fee090","#ffffbf","#40004b","#762a83","#9970ab","#c2a5cf","#e7d4e8","#d9f0d3","#a6dba0","#5aae61","#1b7837","#00441b","#e0f3f8","#abd9e9","#74add1","#4575b4","#313695","#8e0152","#c51b7d","#de77ae","#f1b6da","#fde0ef","#e6f5d0","#b8e186","#7fbc41","#4d9221","#276419","#bababa","#878787","#4d4d4d","#1a1a1a")
+
+donut_joint_tax <- c("Alveolata-Ciliates","Alveolata-Dinoflagellates","Alveolata-Syndiniales","Alveolata-Other","Rhizaria-Cercozoa","Rhizaria-Radiolaria","Rhizaria-Other","Stramenopiles-MAST","Stramenopiles-Ochrophyta","Stramenopiles-Other","Hacrobia-Cryptophyta","Hacrobia-Haptophyta","Hacrobia-Other","Amoebozoa","Excavata","Apusozoa","Archaeplastida-Chlorophyta","Archaeplastida-Other","Opisthokonta-Fungi","Opisthokonta-Metazoa","Opisthokonta-Other","Unassigned-Eukaryote",
+                     "Epsilonbacteraeota-Arcobacter","Epsilonbacteraeota-Caminibacter","Epsilonbacteraeota-Campylobacter","Epsilonbacteraeota-Hydrogenimonas","Epsilonbacteraeota-Nitratifractor","Epsilonbacteraeota-Nitratiruptor","Epsilonbacteraeota-Sulfurimonas","Epsilonbacteraeota-Sulfurovum","Proteobacteria-Alphaproteobacteria","Proteobacteria-Deltaproteobacteria","Proteobacteria-Gammaproteobacteria","Proteobacteria-Methylococcales","Proteobacteria-Oceanospirillales","Proteobacteria-SUP05 cluster","Acidobacteria","Actinobacteria","Aquificae","Bacteroidetes","Chloroflexi","Thaumarchaeota-Nitrososphaeria","Euryarchaeota-Thermoplasmata","Fusobacteria-Psychrilyobacter","Marinimicrobia (SAR406 clade)","Nitrospinae-Nitrospinaceae","Other")
+donut_joint_tax_color <- c("#fa9fb5","#d7b5d8","#c994c7","#ce1256","#fc9272","#ef3b2c","#800026","#fff7bc","#fec44f","#d95f0e","#74c476","#238b45","#00441b","#7fcdbb","#084081","#c6dbef","#2b8cbe","#016c59","#bcbddc","#807dba","#54278f","#bdbdbd",
+                           "#a50026","#d73027","#f46d43","#fdae61","#fee090","#ffffbf","#40004b","#762a83","#9970ab","#c2a5cf","#e7d4e8","#d9f0d3","#a6dba0","#5aae61","#1b7837","#00441b","#e0f3f8","#abd9e9","#74add1","#4575b4","#313695","#8e0152","#c51b7d","#de77ae","#f1b6da","#fde0ef","#e6f5d0","#b8e186","#7fbc41","#4d9221","#276419","#bababa","#878787","#4d4d4d","#1a1a1a")
+putative_prey$TAX_ORDER_BAC <- factor(putative_prey$TAX_SHORT.B, levels = donut_joint_tax)
+names(donut_joint_tax_color) <- donut_joint_tax
+
+```
+
+```{r Alluvial plot, fig.height=15, fig.width=22}
+# svg("figs/18s-16s-alluvial-interaction.svg", h = 15, w = 22)
+ggplot(putative_prey,
+       aes(axis1 = LEVEL2ORDER, axis2 = TAX_SHORT.B, y = count_sum)) +
+  scale_x_discrete(limits = c("TAX_SHORT.A", "TAX_SHORT.B"), expand = c(.2, .05)) +
+  geom_alluvium(aes(fill = LEVEL2ORDER), 
+                alpha = 1, width = 1/10) +
+                # segments = 1, knot.prop = FALSE,
+                # decreasing = FALSE, width = 1/8,
+                # curve_type = "xspline", curve_range = 4) +
+  # scale_fill_manual(values = level2color) +
+  scale_fill_manual(values = tmp_color) +
+  facet_wrap(.~ EUK_DIST.A, scales = "free") +
+  # geom_stratum(width = 1/10, fill = "#d9d9d9", alpha = 0.2, color = "#525252") +
+  geom_stratum(width = 1/10, alpha = 1, color = "#525252", aes(fill = TAX_SHORT.B)) +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum)), size = 4, hjust = 1, color = "black") +
+  # ggrepel::geom_text_repel(stat = "stratum", aes(label = after_stat(stratum)), size = 6, color = "black", direction = "y", nudge_x = .5) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+        legend.title = element_blank(),
+        axis.text.y = element_text(color = "black", size = 16, face = "bold"),
+        axis.title = element_text(color = "black", size = 16, face = "bold")) +
+  labs(y = "Total Interactions", x = "", title = "18S-16S interactions")
+# dev.off()
+# ?geom_alluvium
+```
+
+```{r, fig.height=8, fig.width=8}
+# svg("resident-tmp.svg", w = 8, h = 8)
+# putative_prey %>% 
+#   filter(EUK_DIST.A != "Cosmopolitan") %>%
+#   group_by(LEVEL2ORDER, EUK_DIST.A) %>% 
+#     summarise(SUM = sum(count_sum)) %>% 
+# ggplot(aes(x = EUK_DIST.A, fill = LEVEL2ORDER, y = SUM)) +
+#   geom_bar(stat = "identity", 
+#            position = "stack", color = "black", alpha = 1, width = c(0.8)) +
+#             coord_polar("y", start = 0) +
+#             scale_fill_manual(values = level2color) +
+#             facet_wrap(.~EUK_DIST.A) +
+#             theme_void() +
+#             theme(legend.title = element_blank(),
+#                  legend.text = element_text(size = 15)) +
+#             labs(title = "Resident protist")
+# dev.off()
+```
+
+
+```{r, fig.height=12, fig.width=14}
+#
+# Alluvial donut for protists
+#
+
+# svg("figs/alluvial-donut-resident.svg", h = 12, w = 24)
+putative_prey %>%
+  # Resident only
+  filter(EUK_DIST.A != "Cosmopolitan") %>% 
+ggplot(aes(axis1 = LEVEL2ORDER, axis2 = TAX_ORDER_BAC, y = count_sum)) +
+  scale_x_discrete(limits = c("TAX_SHORT.A", "TAX_SHORT.B"), expand = c(0.5, 0)) +
+  geom_alluvium(aes(fill = LEVEL2ORDER), 
+                alpha = 1, width = 1/10, color = "black") +
+  scale_fill_manual(values = level2color) +
+  geom_stratum(width = 1/4, alpha = 1, color = "black", aes(fill = LEVEL2ORDER)) +
+  ggrepel::geom_text_repel(stat = "stratum", aes(label = after_stat(stratum)), size = 6, color = "black", direction = "y", nudge_x = .5) +
+  coord_polar("y", start=0) +
+  theme_void() +
+  theme(legend.title = element_blank()) +
+  labs(title = "Resident interactions")
+# dev.off()
+
+# svg("figs/alluvial-donut-cosmopolitan.svg", h = 12, w = 24)
+putative_prey %>%
+  # Cosmopiltan only
+  filter(EUK_DIST.A == "Cosmopolitan") %>%
+ggplot(aes(axis1 = LEVEL2ORDER, axis2 = TAX_ORDER_BAC, y = count_sum)) +
+  scale_x_discrete(limits = c("TAX_SHORT.A", "TAX_SHORT.B"), expand = c(0.5, 0)) +
+  geom_alluvium(aes(fill = LEVEL2ORDER),
+                alpha = 1, width = 1/10, color = "black") +
+  scale_fill_manual(values = level2color) +
+  geom_stratum(width = 1/4, alpha = 1, color = "black", aes(fill = LEVEL2ORDER)) +
+  ggrepel::geom_text_repel(stat = "stratum", aes(label = after_stat(stratum)), size = 6, color = "black", direction = "y", nudge_x = .5) +
+  coord_polar("y", start=0) +
+  theme_void() +
+  theme(legend.title = element_blank()) +
+  labs(title = "Cosmopolitan interactions")
+# dev.off()
+# View(putative_prey)
+```
+
+```{r Alluvial for 16S, fig.height=12, fig.width=14}
+#
+# Alluvial donut for bacteria
+#
+
+# svg("figs/alluvial-donut-resident-16S.svg", h = 12, w = 24)
+# names(bac_tax_color) <- bac_tax_order
+putative_prey %>%
+  # Resident only
+  filter(EUK_DIST.A != "Cosmopolitan") %>% 
+ggplot(aes(axis1 = LEVEL2ORDER, axis2 = TAX_ORDER_BAC, y = count_sum)) +
+  scale_x_discrete(limits = c("TAX_SHORT.A", "TAX_ORDER_BAC"), expand = c(0.5, 0)) +
+  geom_alluvium(aes(fill = TAX_ORDER_BAC), 
+                alpha = 1, width = 1/10, color = "black") +
+  geom_stratum(width = 1/4, alpha = 1, color = "black", aes(fill = TAX_ORDER_BAC)) +
+  scale_fill_manual(values = bac_tax_color) +
+  ggrepel::geom_text_repel(stat = "stratum", aes(label = after_stat(stratum)), size = 6, color = "black", direction = "y", nudge_x = .5) +
+  coord_polar("y", start=0) +
+  theme_void() +
+  theme(legend.title = element_blank()) +
+  labs(title = "Resident interactions")
+# dev.off()
+
+# svg("figs/alluvial-donut-cosmopolitan-16S.svg", h = 12, w = 24)
+putative_prey %>%
+  # Resident only
+  filter(EUK_DIST.A == "Cosmopolitan") %>% 
+ggplot(aes(axis1 = LEVEL2ORDER, axis2 = TAX_ORDER_BAC, y = count_sum)) +
+  scale_x_discrete(limits = c("TAX_SHORT.A", "TAX_ORDER_BAC"), expand = c(0.5, 0)) +
+  geom_alluvium(aes(fill = TAX_ORDER_BAC), 
+                alpha = 1, width = 1/10, color = "black") +
+  geom_stratum(width = 1/4, alpha = 1, color = "black", aes(fill = TAX_ORDER_BAC)) +
+  scale_fill_manual(values = bac_tax_color) +
+  ggrepel::geom_text_repel(stat = "stratum", aes(label = after_stat(stratum)), size = 6, color = "black", direction = "y", nudge_x = .5) +
+  coord_polar("y", start=0) +
+  theme_void() +
+  theme(legend.title = element_blank()) +
+  labs(title = "Cosmopolitan interactions")
+# dev.off()
+```
+
+
+
+# Compare grazing rates and environmental information
+```{r Import values}
+gr <- read.delim("data-input/Grazing-calc-wCarbon-results.txt")
+env <- read.delim("data-input/GR-environ-SAMPLE.txt")
+# head(gr)
+# View(unique(gr$SAMPLE))
+env
+```
+
+```{r Join data}
+# Join
+gr_env <- gr %>% 
+  left_join(env, by = "SAMPLE") %>% 
+  select(SAMPLE, SampleOrigin, Vent.name, SAMPLE_ORDER, GrazingRate_hr, Prok_turnover, ugC_L_perday_morono, DEPTH, TEMP, PH, MG, SEA_PER, MICRO) %>% 
+  pivot_longer(cols = c(GrazingRate_hr, Prok_turnover, ugC_L_perday_morono), names_to = "Grazing_variable", values_to = "grazing_value") %>% 
+  pivot_longer(cols = c(DEPTH, TEMP, PH, MG, SEA_PER, MICRO), names_to = "Env_variable", values_to = "env_value")
+# ?pivot_longer
+# head(gr_env)
+# colnames(gr_env)
+unique(gr_env$Grazing_variable)
+```
+
+
+```{r Regression}
+library(broom)
+# View(gr_env)
+regression_gr_tmp <- gr_env %>%
+  filter(!(Env_variable == "DEPTH")) %>%
+  filter(!is.na(env_value)) %>%
+  select(SampleOrigin, Vent.name, Grazing_variable, grazing_value, Env_variable, env_value) %>%
+  group_by(Grazing_variable, Env_variable) %>%
+  nest(-Grazing_variable, -Env_variable) %>%
+  mutate(lm_fit = map(data, ~lm(grazing_value ~ env_value, data = .)),
+         tidied = map(lm_fit, tidy)) %>%
+  unnest(tidied) %>%
+  select(Grazing_variable, Env_variable, term, estimate) %>%
+  pivot_wider(names_from = term, values_from = estimate) %>%
+  select(everything(), SLOPE = env_value) %>%
+  data.frame
+
+# head(regression_gr_tmp)
+
+regression_gr_env <- gr_env %>%
+  filter(!(Env_variable == "DEPTH")) %>%
+  filter(!is.na(env_value)) %>%
+  select(SampleOrigin, Vent.name, Grazing_variable, grazing_value, Env_variable, env_value) %>%
+  group_by(Grazing_variable, Env_variable) %>%
+  nest(-Grazing_variable, -Env_variable) %>%
+  mutate(lm_fit = map(data, ~lm(grazing_value ~ env_value, data = .)),
+         glanced = map(lm_fit, glance)) %>%
+  unnest(glanced) %>%
+  select(Grazing_variable, Env_variable, r.squared, adj.r.squared) %>% 
+  right_join(regression_gr_tmp) %>% 
+  right_join(gr_env) %>% 
+  data.frame
+# View(regression_gr)
+# range(regression_gr$r.squared)
+```
+
+
+```{r Factoring regression}
+sampleorder <- c("Near vent BW","Mt Edwards","Venti latte","Candelabra","SirVentsalot")
+sampleorder_names <- c("Near vent BW","Mt. Edwards","Venti latte","Candelabra","Sir Ventsalot")
+shapes <- c(23, 21, 21, 21, 21)
+samplecolor <- c("#6f88af","#61ac86","#711518","#dfa837","#ce536b")
+regression_gr_env$SAMPLE_ORDER <- factor(regression_gr_env$Vent.name, levels = sampleorder, labels = sampleorder_names)
+names(sampleorder_names) <- samplecolor
+
+regression_gr_env$ENV_LABEL <- factor(regression_gr_env$Env_variable, levels = c("TEMP","MICRO", "SEA_PER", "PH", "MG"),
+                           labels = c(expression("Temperature"^o~"C"),
+                                      bquote("Cells "~mL^-1),
+                                      bquote("Seawater~Percent"),
+                                      bquote("pH"),
+                                      bquote("Mg (mM)")))
+# head(regression_gr_env)
+```
+
+
+```{r Plot relationships, fig.height=10, fig.width=10}
+# X = GrazingRate_hr, Prok_turnover, ugC_L_perday
+# Y = DEPTH, TEMP, PH, MG, SEA_PER, MICRO
+# svg("figs/SUPPLEMENTARY-grazing-env-relationship.svg", h = 10, w = 10)
+plot_grid(
+  regression_gr_env %>% 
+  filter(!(Env_variable == "DEPTH")) %>%
+  filter(!(is.na(env_value))) %>%
+  filter(Grazing_variable == "GrazingRate_hr") %>% 
+  ggplot(aes(x = env_value, y = grazing_value, fill = SAMPLE_ORDER)) +
+  geom_abline(aes(slope = SLOPE, intercept = `X.Intercept.`), color = "black", linetype = "dashed", size = 0.5) +
+  geom_point(color = "black", size = 4, aes(shape = SAMPLE_ORDER)) +
+    geom_smooth(method = lm) +
+  scale_fill_manual(values = samplecolor) +
+  scale_shape_manual(values = shapes) +
+  facet_wrap(. ~ ENV_LABEL + round(r.squared, 3), scales = "free", ncol = 5, 
+             strip.position = "bottom", labeller = label_parsed) +
+  theme_bw() +
+  theme(
+    strip.background = element_blank(),
+    strip.placement = "outside",
+    strip.text = element_text(color = "black", size = 10),
+    axis.title = element_text(color = "black", size = 10),
+    legend.title = element_blank()) +
+  labs(y = bquote("Cells "~mL^-1 ~hr^-1), x = ""),
+  regression_gr_env %>% 
+  filter(!(Env_variable == "DEPTH")) %>% 
+    filter(!(is.na(env_value))) %>%
+  filter(Grazing_variable == "Prok_turnover") %>% 
+  ggplot(aes(x = env_value, y = grazing_value, fill = SAMPLE_ORDER)) +
+  geom_abline(aes(slope = SLOPE, intercept = `X.Intercept.`), color = "black", linetype = "dashed", size = 0.5) +
+  geom_point(color = "black", size = 4, aes(shape = SAMPLE_ORDER)) +
+    geom_smooth(method = lm) +
+  scale_fill_manual(values = samplecolor) +
+  scale_shape_manual(values = shapes) +
+  facet_wrap(. ~ ENV_LABEL + round(r.squared, 3), scales = "free", ncol = 5, 
+             strip.position = "bottom", labeller = label_parsed) +
+  theme_bw() +
+  theme(
+    strip.background = element_blank(),
+    strip.placement = "outside",
+    strip.text = element_text(color = "black", size = 10),
+    axis.title = element_text(color = "black", size = 10),
+    legend.title = element_blank()) +
+  labs(y = bquote("Prokaryote Turnover %"~day^-1), x = ""),
+  regression_gr_env %>%
+  filter(!(Env_variable == "DEPTH")) %>%
+    filter(!(is.na(env_value))) %>%
+  filter(Grazing_variable == "ugC_L_perday_morono") %>%
+  ggplot(aes(x = env_value, y = grazing_value, fill = SAMPLE_ORDER)) +
+  geom_abline(aes(slope = SLOPE, intercept = `X.Intercept.`), color = "black", linetype = "dashed", size = 0.5) +
+  geom_point(color = "black", size = 4, aes(shape = SAMPLE_ORDER)) +
+    geom_smooth(method = lm) +
+  scale_fill_manual(values = samplecolor) +
+  scale_shape_manual(values = shapes) +
+  facet_wrap(. ~ ENV_LABEL + round(r.squared, 3), scales = "free", ncol = 5,
+             strip.position = "bottom", labeller = label_parsed) +
+  theme_bw() +
+  theme(
+    strip.background = element_blank(),
+    strip.placement = "outside",
+    strip.text = element_text(color = "black", size = 10),
+    axis.title = element_text(color = "black", size = 10),
+    legend.title = element_blank()) +
+  labs(y = bquote("ug C"~L^{-1}~day^{-1}), x = ""),
+  nrow = 3, labels = c("a", "b", "c"))
+# dev.off()
+# str(gr_env)
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```
+
+

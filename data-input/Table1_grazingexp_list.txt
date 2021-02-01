@@ -1,0 +1,9 @@
+Dive	Sample Location	Sample ID	Vent name	Depth (m)	Start date	End date	Est. FLP added (cells/mL)	T0	T18	T24	T36	T1	T2	Incubation temp min	Incubation temp max	Collection temp min	Collection temp max
+H1750	Plume	NA108-001	Mt Edwards		29-May	31-May	4.40E+04	12:00:00 AM		10:45:00 PM	11:00:00 AM	23	35	12	15		
+H1750	BSW	NA108-003	Water column		29-May	31-May	4.40E+04	2:30:00 AM		10:45:00 PM	11:00:00 AM	21	35	12	15	1	2
+H1751	Vent	NA108-013	Mt Edwards		30-May	1-Jun	4.40E+04	10:30:00 PM		10:30:00 PM	11:00:00 AM	24	36	12	15	15	30
+H1752	Plume	NA108-036	Mt Edwards2		31-May	2-Jun	8.90E+03	9:50:00 PM		9:50:00 PM	9:50:00 PM	24	36	13	15		
+H1753	Vent	NA108-043	Venti latte		4-Jun	6-Jun	4.40E+04	12:00:00 AM	7:00:00 PM	5:00:00 AM		19	29	13	16.7	8	23
+H1755	Vent	NA108-090	Candelabra		6-Jun	7-Jun	4.40E+04	4:00:00 AM	7:30:00 PM	6:30:00 AM		16	26	12	15	9	68
+H1755	Plume	NA108-096	Mt Edwards		6-Jun	7-Jun	8.90E+03	2:30:00 AM		10:30:00 PM	3:30:00 PM	20	37	13	17		
+H1756	Vent	NA108-110	SirVentsalot		7-Jun	8-Jun	4.40E+04	10:00:00 PM	4:00:00 PM	10:00:00 PM		18	24	13	16	3	53

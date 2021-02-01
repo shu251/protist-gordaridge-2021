@@ -1,0 +1,63 @@
+COMPILED	CLASS_COMPLEX	CLASS_SIMPLE_I	CLASS_SIMPLE_II
+bsw	Background only	Background	Background
+ventgrazeneargraze	Grazing experiment only	Other	Other
+ventgraze	Grazing experiment only	Other	Other
+neargraze	Grazing experiment only	Other	Other
+near	Near vent BW only	Resident	Vent local (no background, no vent)
+nearneargraze	Near vent BW only	Resident	Vent local (no background, no vent)
+plume	Plume only	Resident	Vent local (no background, no vent)
+ventgrazebsw	Vent and background only	Cosmopolitan	Other
+ventbsw	Vent and background only	Cosmopolitan	Vent resident and background
+ventventgrazebsw	Vent and background only	Cosmopolitan	Vent resident and background
+ventventgrazeplume	Vent and plume only	Resident	Vent local
+ventventgrazeneargrazeplume	Vent and vent influenced (no background)	Resident	Vent local
+ventneargrazeplume	Vent and vent influenced (no background)	Resident	Vent local
+ventnearneargrazeplume	Vent and vent influenced (no background)	Resident	Vent local
+ventnearplume	Vent and vent influenced (no background)	Resident	Vent local
+ventventgrazenearplume	Vent and vent influenced (no background)	Resident	Vent local
+ventplume	Vent and vent influenced (no BW)	Resident	Vent local
+ventnear	Vent and vent influenced (no plume)	Resident	Vent local
+ventneargraze	Vent and vent influenced (no plume)	Resident	Vent local
+ventnearneargraze	Vent and vent influenced (no plume)	Resident	Vent local
+ventventgrazenear	Vent and vent influenced (no plume)	Resident	Vent local
+ventventgrazeneargraze	Vent and vent influenced (no plume)	Resident	Vent local
+ventventgrazenearneargraze	Vent and vent influenced (no plume)	Resident	Vent local
+ventventgrazenearneargrazeplume	Vent and vent influenced (no background)	Resident	Vent local
+nearneargrazeplumebsw	Vent influenced and background (no vent)	Cosmopolitan	Background and vent local (no vent)
+nearplumebsw	Vent influenced and background (no vent)	Cosmopolitan	Background and vent local (no vent)
+ventgrazeneargrazeplumebsw	Vent influenced and background (no vent)	Cosmopolitan	Background and vent local (no vent)
+neargrazeplumebsw	Vent influenced and background (no vent)	Cosmopolitan	Background and vent local (no vent)
+ventgrazenearneargrazeplumebsw	Vent influenced and background (no vent)	Cosmopolitan	Background and vent local (no vent)
+ventgrazenearplumebsw	Vent influenced and background (no vent)	Cosmopolitan	Background and vent local (no vent)
+ventgrazeplumebsw	Vent influenced and background (no vent)	Cosmopolitan	Background and vent local (no vent)
+ventneargrazeplumebsw	Vent, vent influenced, and background	Cosmopolitan	Background and vent local (w vent)
+ventnearneargrazeplumebsw	Vent, vent influenced, and background	Cosmopolitan	Background and vent local (w vent)
+ventnearplumebsw	Vent, vent influenced, and background	Cosmopolitan	Background and vent local (w vent)
+ventventgrazeneargrazeplumebsw	Vent, vent influenced, and background	Cosmopolitan	Background and vent local (w vent)
+ventventgrazenearneargrazeplumebsw	Vent, vent influenced, and background	Cosmopolitan	Background and vent local (w vent)
+ventventgrazenearplumebsw	Vent, vent influenced, and background	Cosmopolitan	Background and vent local (w vent)
+plumebsw	Vent influenced and background (no BW)	Cosmopolitan	Background and vent local (no vent)
+ventventgrazeplumebsw	Vent, vent influenced, and background (no BW)	Cosmopolitan	Background and vent local (w vent)
+ventplumebsw	Vent, vent influenced, and background (no BW)	Cosmopolitan	Background and vent local (w vent)
+nearneargrazebsw	Vent influenced and background (no plume)	Cosmopolitan	Background and vent local (no vent)
+ventgrazeneargrazebsw	Vent influenced and background (no plume)	Cosmopolitan	Background and vent local (no vent)
+nearbsw	Vent influenced and background (no plume)	Cosmopolitan	Background and vent local (no vent)
+neargrazebsw	Vent influenced and background (no plume)	Cosmopolitan	Background and vent local (no vent)
+ventgrazenearbsw	Vent influenced and background (no plume)	Cosmopolitan	Background and vent local (no vent)
+ventgrazenearneargrazebsw	Vent influenced and background (no plume)	Cosmopolitan	Background and vent local (no vent)
+ventnearbsw	Vent, vent influenced, and background (no plume)	Cosmopolitan	Background and vent local (w vent)
+ventneargrazebsw	Vent, vent influenced, and background (no plume)	Cosmopolitan	Background and vent local (w vent)
+ventnearneargrazebsw	Vent, vent influenced, and background (no plume)	Cosmopolitan	Background and vent local (w vent)
+ventventgrazenearbsw	Vent, vent influenced, and background (no plume)	Cosmopolitan	Background and vent local (w vent)
+ventventgrazeneargrazebsw	Vent, vent influenced, and background (no plume)	Cosmopolitan	Background and vent local (w vent)
+ventventgrazenearneargrazebsw	Vent, vent influenced, and background (no plume)	Cosmopolitan	Background and vent local (w vent)
+neargrazeplume	Vent influenced only (no background, no vent)	Resident	Vent local (no background, no vent)
+nearneargrazeplume	Vent influenced only (no background, no vent)	Resident	Vent local (no background, no vent)
+nearplume	Vent influenced only (no background, no vent)	Resident	Vent local (no background, no vent)
+ventgrazenear	Vent influenced only (no background, no vent)	Resident	Vent local (no background, no vent)
+ventgrazeneargrazeplume	Vent influenced only (no background, no vent)	Resident	Vent local (no background, no vent)
+ventgrazenearneargraze	Vent influenced only (no background, no vent)	Resident	Vent local (no background, no vent)
+ventgrazenearneargrazeplume	Vent influenced only (no background, no vent)	Resident	Vent local (no background, no vent)
+ventgrazeplume	Vent influenced only (no background, no vent)	Resident	Vent local (no background, no vent)
+vent	Vent only	Resident	Vent resident
+ventventgraze	Vent only	Resident	Vent resident
