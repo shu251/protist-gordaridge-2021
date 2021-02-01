@@ -663,46 +663,40 @@ sum(GR_tagseq_counts_noCTRL$COUNT)
 ```
 
 ```{r Remove contaminants}
-counts_decont <- subset(GR_tagseq_longformat, !(Feature.ID %in% list_of_contams))
-length(unique(counts_decont$Feature.ID)) - length(unique(GR_tagseq_longformat$Feature.ID)) # Confirm 34 lines removed
+counts_decont_tmp <- GR_tagseq_longformat %>% 
+  filter(!(Feature.ID %in% list_of_contams))
+# Check
+length(unique(counts_decont_tmp$Feature.ID)) - length(unique(GR_tagseq_longformat$Feature.ID)) # Confirm 34 lines removed
 ```
 
 ```{r Percent of sequences removed after decontam}
 # % of sequences was removed following decontam; this is counting the ship blank samples themselves
-100*(1-(sum(counts_decont$COUNT)/sum(GR_tagseq_counts_noCTRL$COUNT)))
+100*(1-(sum(counts_decont_tmp$COUNT)/sum(GR_tagseq_counts_noCTRL$COUNT)))
 # head(counts_decont)
 ```
 
-```{r Report removal of sequences by sample, warning=FALSE, message=FALSE}
+```{r Report removal of sequences by sample}
 # Breakdown by samples:
 passfail_wide <- dcast(passfail, SAMPLE ~ CONTAM)
 passfail_wide$PercLossSeq <- paste(100*(passfail_wide$Fail/(passfail_wide$Fail+passfail_wide$Pass)))
 # dim(passfail_wide)
 # write.csv(passfail_wide, file="PercSeqLost-decontam.csv")
 # breakdown by sample - reports % lost per sample
+```
 
-# Remove contaminant sequences from phyloseq object:
-# Subset TRUE contaminants
-# ?prune_taxa
-# class(keep_asvs)
-physeq_tmp <- prune_taxa(keep_asvs, physeq_names)
-sample_data(physeq_tmp)
+```{r Remove sample with too few sequences}
+# Remove controls
+counts_decont <- counts_decont_tmp %>% 
+  filter(!(SAMPLE == "GordaRidge_BSW020_sterivex_2019_REPa")) %>% 
+  filter(!(SAMPLEID %in% "CTRL")) %>% 
+  data.frame
 
-# Remove one sample with too few sequences
-physeq_clean <- subset_samples(physeq_tmp, 
-                               sample_names(physeq_tmp) !="GordaRidge_BSW020_sterivex_2019_REPa")
-sample_data(physeq_clean)
-# physeq_clean
-# Remove control samples from data frame
-tmp <- subset(GR_tagseq_longformat, !(SAMPLEID %in% "CTRL")) # Remove controls, get list of sample names that are controls
-samples_keep <- as.character(unique(tmp$SAMPLE))
-physeq_clean_true <- prune_samples(samples_keep, physeq_clean)
 ```
 
 ## Save output
 ```{r Save output}
 # Save as R Data
-# save(counts_decont, file="data-input/GR-ASV-table-clean.RData")
+save(counts_decont, file="data-input/GR-ASV-table-clean.RData")
 ```
 
 # Plot high level taxonomy of protists _in situ_
@@ -1020,19 +1014,12 @@ nometaz_all
 # Ordination analysis
 
 ## Import 18S-derived data
-```{r Load libraries for ordination, warning=FALSE, message=FALSE}
+```{r Load libraries for ordination, message=FALSE}
 load("data-input/GordaRidge-ASVtable-avg.RData")
 ventnames <- read.delim("data-input/ventnames-gordaridge.txt")
-library(reshape2); 
-library(vegan); 
-library(dplyr)
+library(vegan); library(compositions); 
+library(purrr);library(cluster);library(ape); library(reshape2)
 # library(ade4); 
-library(compositions); 
-library(tidyverse)
-library(purrr)
-library(cluster)
-library(RColorBrewer)
-library(ape)
 # ventnames
 ```
 
@@ -1957,8 +1944,10 @@ bac_wcuratedtax_toplot$LOCATION <- factor(bac_wcuratedtax_toplot$LocationName, l
 
 ### Generate 16S bar plots
 ```{r 16S barplot}
-tax_color<-c("#a50026","#d73027","#f46d43","#fdae61","#fee090","#ffffbf","#40004b","#762a83","#9970ab","#c2a5cf","#e7d4e8","#d9f0d3","#a6dba0","#5aae61","#1b7837","#00441b","#e0f3f8","#abd9e9","#74add1","#4575b4","#313695","#8e0152","#c51b7d","#de77ae","#f1b6da","#fde0ef","#e6f5d0","#b8e186","#7fbc41","#4d9221","#276419","#bababa","#878787","#4d4d4d","#1a1a1a")
+tax_color<-c("#7fcdbb","#014636","#41b6c4","#016c59","#d0d1e6","#02818a","#a6bddb","#3690c0","#00441b","#99d8c9","#006d2c","#66c2a4","#238b45","#c7e9b4","#fdd0a2","#fd8d3c","#d94801","#7f2704","#dadaeb","#54278f","#bcbddc","#6a51a3","#9e9ac8","#8c6bb1","#737373")
+
 tax_order <- c("Epsilonbacteraeota-Arcobacter","Epsilonbacteraeota-Caminibacter","Epsilonbacteraeota-Campylobacter","Epsilonbacteraeota-Hydrogenimonas","Epsilonbacteraeota-Nitratifractor","Epsilonbacteraeota-Nitratiruptor","Epsilonbacteraeota-Sulfurimonas","Epsilonbacteraeota-Sulfurovum","Proteobacteria-Alphaproteobacteria","Proteobacteria-Deltaproteobacteria","Proteobacteria-Gammaproteobacteria","Proteobacteria-Methylococcales","Proteobacteria-Oceanospirillales","Proteobacteria-SUP05 cluster","Acidobacteria","Actinobacteria","Aquificae","Bacteroidetes","Chloroflexi","Thaumarchaeota-Nitrososphaeria","Euryarchaeota-Thermoplasmata","Fusobacteria-Psychrilyobacter","Marinimicrobia (SAR406 clade)","Nitrospinae-Nitrospinaceae","Other")
+names(tax_color) <- tax_order
 
 bac_wcuratedtax_toplot$TAX_ORDER <- factor(bac_wcuratedtax_toplot$Tax_update, levels = tax_order)
 
@@ -1982,7 +1971,7 @@ barplot_16s <- function(df){
 }
 ```
 
-```{r Plot 16S, fig.height=7, fig.width=8}
+```{r Plot 16S, fig.height=8, fig.width=8}
 rm_loc <- c("Purple Rain Vent", "Octopus Springs Vent", "Blue Ciliate")
 
 # svg("16s-curated-static.svg", h=8, w=8)
@@ -2087,7 +2076,7 @@ pca_16s <- ggplot(df_pca_clr_wnames, aes(x = PC1, y = PC2, fill = SAMPLE_ORDER, 
 ```
 
 ```{r Plot panel 16s, fig.height=8, fig.width=19}
-# svg("figs/16s-panel-supplementary.svg", w=16, h=8)
+# svg("16s-panel-supplementary.svg", w=16, h=8)
 plot_grid(
   barplot_16s(bac_wcuratedtax_toplot %>% filter(!(LOCATION %in% rm_loc))),
   pca_16s, axis = c("tblr"), align = c("hv"),
@@ -2436,7 +2425,7 @@ summary_int <- tax_sum_interact %>%
 ```
 
 ```{r Format interactive}
-head(tax_sum_interact)
+# head(tax_sum_interact)
 tax_interact_cor <- tax_sum_interact %>% 
   unite(EUK, TAX_SHORT.A, EUK_2.A, sep = "_", remove = TRUE) %>% 
   select(EUK, PROK = TAX_SHORT.B, COUNT) %>% 
@@ -2445,12 +2434,13 @@ tax_interact_cor <- tax_sum_interact %>%
   # pivot_wider(names_from = PROK, values_from = COUNT, values_fn = sum, values_fill = 0) %>% 
   data.frame
 # head(tax_interact_cor)
-table(tax_sum_interact %>% select(EUK_DIST.A))
+# table(tax_sum_interact$EUK_DIST.A)
+# View(tax_sum_interact)
 ```
 
 
 ### Plot distribution of interactions
-```{r Prep data ahead of alluvial}
+```{r Prep data ahead of alluvial Factor for protists}
 library(ggalluvial)
 # head(tax_sum_interact)
 # unique(tax_sum_interact$TAX_SHORT.A)
@@ -2460,81 +2450,23 @@ putative_prey <- tax_sum_interact %>%
   group_by(TAX_SHORT.A, TAX_SHORT.B, EUK_DIST.A) %>% 
   summarise(count_sum = sum(COUNT)) %>% 
   data.frame
-
+# table(putative_prey$EUK_DIST.A)
 
 level2ORDER <- c("Alveolata-Ciliates","Alveolata-Dinoflagellates","Alveolata-Syndiniales","Alveolata-Other","Rhizaria-Cercozoa","Rhizaria-Radiolaria","Rhizaria-Other","Stramenopiles-MAST","Stramenopiles-Ochrophyta","Stramenopiles-Other","Hacrobia-Cryptophyta","Hacrobia-Haptophyta","Hacrobia-Other","Amoebozoa","Excavata","Apusozoa","Archaeplastida-Chlorophyta","Archaeplastida-Other","Opisthokonta-Fungi","Opisthokonta-Metazoa","Opisthokonta-Other","Unassigned-Eukaryote")
 level2color <- c("#fa9fb5","#d7b5d8","#c994c7","#ce1256","#fc9272","#ef3b2c","#800026","#fff7bc","#fec44f","#d95f0e","#74c476","#238b45","#00441b","#7fcdbb","#084081","#c6dbef","#2b8cbe","#016c59","#bcbddc","#807dba","#54278f","#bdbdbd")
 putative_prey$LEVEL2ORDER <- factor(putative_prey$TAX_SHORT.A, levels=level2ORDER)
 names(level2color)<-level2ORDER
 
-bac_tax_color<-c("#a50026","#d73027","#f46d43","#fdae61","#fee090","#ffffbf","#40004b","#762a83","#9970ab","#c2a5cf","#e7d4e8","#d9f0d3","#a6dba0","#5aae61","#1b7837","#00441b","#e0f3f8","#abd9e9","#74add1","#4575b4","#313695","#8e0152","#c51b7d","#de77ae","#f1b6da","#fde0ef","#e6f5d0","#b8e186","#7fbc41","#4d9221","#276419","#bababa","#878787","#4d4d4d","#1a1a1a")
-bac_tax_order <- c("Epsilonbacteraeota-Arcobacter","Epsilonbacteraeota-Caminibacter","Epsilonbacteraeota-Campylobacter","Epsilonbacteraeota-Hydrogenimonas","Epsilonbacteraeota-Nitratifractor","Epsilonbacteraeota-Nitratiruptor","Epsilonbacteraeota-Sulfurimonas","Epsilonbacteraeota-Sulfurovum","Proteobacteria-Alphaproteobacteria","Proteobacteria-Deltaproteobacteria","Proteobacteria-Gammaproteobacteria","Proteobacteria-Methylococcales","Proteobacteria-Oceanospirillales","Proteobacteria-SUP05 cluster","Acidobacteria","Actinobacteria","Aquificae","Bacteroidetes","Chloroflexi","Thaumarchaeota-Nitrososphaeria","Euryarchaeota-Thermoplasmata","Fusobacteria-Psychrilyobacter","Marinimicrobia (SAR406 clade)","Nitrospinae-Nitrospinaceae","Other")
-putative_prey$TAX_ORDER_BAC <- factor(putative_prey$TAX_SHORT.B, levels = tax_order)
-names(bac_tax_color) <- bac_tax_order
+# Add line for prokaryotes
+donut_joint_tax <- c("Alveolata-Ciliates","Alveolata-Dinoflagellates","Alveolata-Syndiniales","Alveolata-Other","Rhizaria-Cercozoa","Rhizaria-Radiolaria","Rhizaria-Other","Stramenopiles-MAST","Stramenopiles-Ochrophyta","Stramenopiles-Other","Hacrobia-Cryptophyta","Hacrobia-Haptophyta","Hacrobia-Other","Amoebozoa","Excavata","Apusozoa","Archaeplastida-Chlorophyta","Archaeplastida-Other","Opisthokonta-Fungi","Opisthokonta-Metazoa","Opisthokonta-Other","Unassigned-Eukaryote", "Epsilonbacteraeota-Arcobacter","Epsilonbacteraeota-Caminibacter","Epsilonbacteraeota-Campylobacter","Epsilonbacteraeota-Hydrogenimonas","Epsilonbacteraeota-Nitratifractor","Epsilonbacteraeota-Nitratiruptor","Epsilonbacteraeota-Sulfurimonas","Epsilonbacteraeota-Sulfurovum","Proteobacteria-Alphaproteobacteria","Proteobacteria-Deltaproteobacteria","Proteobacteria-Gammaproteobacteria","Proteobacteria-Methylococcales","Proteobacteria-Oceanospirillales","Proteobacteria-SUP05 cluster","Acidobacteria","Actinobacteria","Aquificae","Bacteroidetes","Chloroflexi","Thaumarchaeota-Nitrososphaeria","Euryarchaeota-Thermoplasmata","Fusobacteria-Psychrilyobacter","Marinimicrobia (SAR406 clade)","Nitrospinae-Nitrospinaceae","Other")
 
-tmp_color <- c("#fa9fb5","#d7b5d8","#c994c7","#ce1256","#fc9272","#ef3b2c","#800026","#fff7bc","#fec44f","#d95f0e","#74c476","#238b45","#00441b","#7fcdbb","#084081","#c6dbef","#2b8cbe","#016c59","#bcbddc","#807dba","#54278f","#bdbdbd","#a50026","#d73027","#f46d43","#fdae61","#fee090","#ffffbf","#40004b","#762a83","#9970ab","#c2a5cf","#e7d4e8","#d9f0d3","#a6dba0","#5aae61","#1b7837","#00441b","#e0f3f8","#abd9e9","#74add1","#4575b4","#313695","#8e0152","#c51b7d","#de77ae","#f1b6da","#fde0ef","#e6f5d0","#b8e186","#7fbc41","#4d9221","#276419","#bababa","#878787","#4d4d4d","#1a1a1a")
-
-donut_joint_tax <- c("Alveolata-Ciliates","Alveolata-Dinoflagellates","Alveolata-Syndiniales","Alveolata-Other","Rhizaria-Cercozoa","Rhizaria-Radiolaria","Rhizaria-Other","Stramenopiles-MAST","Stramenopiles-Ochrophyta","Stramenopiles-Other","Hacrobia-Cryptophyta","Hacrobia-Haptophyta","Hacrobia-Other","Amoebozoa","Excavata","Apusozoa","Archaeplastida-Chlorophyta","Archaeplastida-Other","Opisthokonta-Fungi","Opisthokonta-Metazoa","Opisthokonta-Other","Unassigned-Eukaryote",
-                     "Epsilonbacteraeota-Arcobacter","Epsilonbacteraeota-Caminibacter","Epsilonbacteraeota-Campylobacter","Epsilonbacteraeota-Hydrogenimonas","Epsilonbacteraeota-Nitratifractor","Epsilonbacteraeota-Nitratiruptor","Epsilonbacteraeota-Sulfurimonas","Epsilonbacteraeota-Sulfurovum","Proteobacteria-Alphaproteobacteria","Proteobacteria-Deltaproteobacteria","Proteobacteria-Gammaproteobacteria","Proteobacteria-Methylococcales","Proteobacteria-Oceanospirillales","Proteobacteria-SUP05 cluster","Acidobacteria","Actinobacteria","Aquificae","Bacteroidetes","Chloroflexi","Thaumarchaeota-Nitrososphaeria","Euryarchaeota-Thermoplasmata","Fusobacteria-Psychrilyobacter","Marinimicrobia (SAR406 clade)","Nitrospinae-Nitrospinaceae","Other")
-donut_joint_tax_color <- c("#fa9fb5","#d7b5d8","#c994c7","#ce1256","#fc9272","#ef3b2c","#800026","#fff7bc","#fec44f","#d95f0e","#74c476","#238b45","#00441b","#7fcdbb","#084081","#c6dbef","#2b8cbe","#016c59","#bcbddc","#807dba","#54278f","#bdbdbd",
-                           "#a50026","#d73027","#f46d43","#fdae61","#fee090","#ffffbf","#40004b","#762a83","#9970ab","#c2a5cf","#e7d4e8","#d9f0d3","#a6dba0","#5aae61","#1b7837","#00441b","#e0f3f8","#abd9e9","#74add1","#4575b4","#313695","#8e0152","#c51b7d","#de77ae","#f1b6da","#fde0ef","#e6f5d0","#b8e186","#7fbc41","#4d9221","#276419","#bababa","#878787","#4d4d4d","#1a1a1a")
 putative_prey$TAX_ORDER_BAC <- factor(putative_prey$TAX_SHORT.B, levels = donut_joint_tax)
-names(donut_joint_tax_color) <- donut_joint_tax
-
 ```
 
-```{r Alluvial plot, fig.height=15, fig.width=22}
-# svg("figs/18s-16s-alluvial-interaction.svg", h = 15, w = 22)
-ggplot(putative_prey,
-       aes(axis1 = LEVEL2ORDER, axis2 = TAX_SHORT.B, y = count_sum)) +
-  scale_x_discrete(limits = c("TAX_SHORT.A", "TAX_SHORT.B"), expand = c(.2, .05)) +
-  geom_alluvium(aes(fill = LEVEL2ORDER), 
-                alpha = 1, width = 1/10) +
-                # segments = 1, knot.prop = FALSE,
-                # decreasing = FALSE, width = 1/8,
-                # curve_type = "xspline", curve_range = 4) +
-  # scale_fill_manual(values = level2color) +
-  scale_fill_manual(values = tmp_color) +
-  facet_wrap(.~ EUK_DIST.A, scales = "free") +
-  # geom_stratum(width = 1/10, fill = "#d9d9d9", alpha = 0.2, color = "#525252") +
-  geom_stratum(width = 1/10, alpha = 1, color = "#525252", aes(fill = TAX_SHORT.B)) +
-  geom_text(stat = "stratum", aes(label = after_stat(stratum)), size = 4, hjust = 1, color = "black") +
-  # ggrepel::geom_text_repel(stat = "stratum", aes(label = after_stat(stratum)), size = 6, color = "black", direction = "y", nudge_x = .5) +
-  theme_minimal() +
-  theme(axis.text.x = element_blank(),
-        legend.title = element_blank(),
-        axis.text.y = element_text(color = "black", size = 16, face = "bold"),
-        axis.title = element_text(color = "black", size = 16, face = "bold")) +
-  labs(y = "Total Interactions", x = "", title = "18S-16S interactions")
-# dev.off()
-# ?geom_alluvium
-```
-
-```{r, fig.height=8, fig.width=8}
-# svg("resident-tmp.svg", w = 8, h = 8)
-# putative_prey %>% 
-#   filter(EUK_DIST.A != "Cosmopolitan") %>%
-#   group_by(LEVEL2ORDER, EUK_DIST.A) %>% 
-#     summarise(SUM = sum(count_sum)) %>% 
-# ggplot(aes(x = EUK_DIST.A, fill = LEVEL2ORDER, y = SUM)) +
-#   geom_bar(stat = "identity", 
-#            position = "stack", color = "black", alpha = 1, width = c(0.8)) +
-#             coord_polar("y", start = 0) +
-#             scale_fill_manual(values = level2color) +
-#             facet_wrap(.~EUK_DIST.A) +
-#             theme_void() +
-#             theme(legend.title = element_blank(),
-#                  legend.text = element_text(size = 15)) +
-#             labs(title = "Resident protist")
-# dev.off()
-```
-
-
-```{r, fig.height=12, fig.width=14}
+```{r, fig.height=12, fig.width=24}
 #
 # Alluvial donut for protists
 #
-
 # svg("figs/alluvial-donut-resident.svg", h = 12, w = 24)
 putative_prey %>%
   # Resident only
@@ -2545,11 +2477,15 @@ ggplot(aes(axis1 = LEVEL2ORDER, axis2 = TAX_ORDER_BAC, y = count_sum)) +
                 alpha = 1, width = 1/10, color = "black") +
   scale_fill_manual(values = level2color) +
   geom_stratum(width = 1/4, alpha = 1, color = "black", aes(fill = LEVEL2ORDER)) +
-  ggrepel::geom_text_repel(stat = "stratum", aes(label = after_stat(stratum)), size = 6, color = "black", direction = "y", nudge_x = .5) +
+  ggrepel::geom_text_repel(stat = "stratum", 
+                           aes(label = str_wrap(after_stat(stratum),6)), force = 1,
+                           size = 4, color = "black", 
+                           direction = "y", nudge_x = .4) +
   coord_polar("y", start=0) +
   theme_void() +
   theme(legend.title = element_blank()) +
-  labs(title = "Resident interactions")
+  labs(title = "Resident interactions (n = 165)") +
+  guides(fill=guide_legend(ncol=1))
 # dev.off()
 
 # svg("figs/alluvial-donut-cosmopolitan.svg", h = 12, w = 24)
@@ -2562,53 +2498,81 @@ ggplot(aes(axis1 = LEVEL2ORDER, axis2 = TAX_ORDER_BAC, y = count_sum)) +
                 alpha = 1, width = 1/10, color = "black") +
   scale_fill_manual(values = level2color) +
   geom_stratum(width = 1/4, alpha = 1, color = "black", aes(fill = LEVEL2ORDER)) +
-  ggrepel::geom_text_repel(stat = "stratum", aes(label = after_stat(stratum)), size = 6, color = "black", direction = "y", nudge_x = .5) +
+  ggrepel::geom_text_repel(stat = "stratum", 
+                           aes(label = str_wrap(after_stat(stratum),6)), force = 1,
+                           size = 4, color = "black", 
+                           direction = "y", nudge_x = .4) +
   coord_polar("y", start=0) +
   theme_void() +
   theme(legend.title = element_blank()) +
-  labs(title = "Cosmopolitan interactions")
+  labs(title = "Cosmopolitan interactions (n = 165)") +
+  guides(fill=guide_legend(ncol=1))
 # dev.off()
-# View(putative_prey)
 ```
+
+```{r Factor individual bacteria alluvial pies}
+bac_resident_putative_prey <- putative_prey %>%
+  # Resident only
+  filter(EUK_DIST.A != "Cosmopolitan") %>% 
+  data.frame
+bac_tax_res <- c("Epsilonbacteraeota-Arcobacter","Epsilonbacteraeota-Caminibacter","Epsilonbacteraeota-Campylobacter","Epsilonbacteraeota-Nitratifractor","Epsilonbacteraeota-Nitratiruptor","Epsilonbacteraeota-Sulfurimonas","Epsilonbacteraeota-Sulfurovum","Proteobacteria-Alphaproteobacteria","Proteobacteria-Gammaproteobacteria","Proteobacteria-Oceanospirillales","Proteobacteria-SUP05 cluster","Actinobacteria","Bacteroidetes","Chloroflexi","Thaumarchaeota-Nitrososphaeria","Euryarchaeota-Thermoplasmata","Fusobacteria-Psychrilyobacter","Marinimicrobia (SAR406 clade)","Nitrospinae-Nitrospinaceae")
+bac_col_res <- c("#7fcdbb","#014636","#41b6c4","#d0d1e6","#02818a","#a6bddb","#3690c0","#00441b","#006d2c","#238b45","#c7e9b4","#fd8d3c","#7f2704","#dadaeb","#54278f","#bcbddc","#6a51a3","#9e9ac8","#8c6bb1")
+bac_resident_putative_prey$BAC_RES <- factor(bac_resident_putative_prey$TAX_SHORT.B, levels = bac_tax_res)
+names(bac_col_res) <- bac_tax_res
+##
+##
+##
+bac_cosmo_putative_prey <- putative_prey %>%
+  # Resident only
+  filter(EUK_DIST.A == "Cosmopolitan") %>% 
+  data.frame
+# unique(bac_cosmo_putative_prey$TAX_SHORT.B)
+bac_tax_cos <- c("Epsilonbacteraeota-Arcobacter","Epsilonbacteraeota-Caminibacter","Epsilonbacteraeota-Campylobacter","Epsilonbacteraeota-Hydrogenimonas","Epsilonbacteraeota-Nitratifractor","Epsilonbacteraeota-Nitratiruptor","Epsilonbacteraeota-Sulfurimonas","Epsilonbacteraeota-Sulfurovum","Proteobacteria-Alphaproteobacteria","Proteobacteria-Gammaproteobacteria","Proteobacteria-Methylococcales","Proteobacteria-Oceanospirillales","Proteobacteria-SUP05 cluster","Actinobacteria","Aquificae","Bacteroidetes","Chloroflexi","Thaumarchaeota-Nitrososphaeria","Euryarchaeota-Thermoplasmata","Fusobacteria-Psychrilyobacter","Marinimicrobia (SAR406 clade)","Nitrospinae-Nitrospinaceae")
+bac_col_cos <- c("#7fcdbb","#014636","#41b6c4","#016c59","#d0d1e6","#02818a","#a6bddb","#3690c0","#00441b","#006d2c","#66c2a4","#238b45","#c7e9b4","#fd8d3c","#d94801","#7f2704","#dadaeb","#54278f","#bcbddc","#6a51a3","#9e9ac8","#8c6bb1")
+bac_cosmo_putative_prey$BAC_COS <- factor(bac_cosmo_putative_prey$TAX_SHORT.B, levels = bac_tax_cos)
+names(bac_col_cos) <- bac_tax_cos
+```
+
+
 
 ```{r Alluvial for 16S, fig.height=12, fig.width=14}
 #
 # Alluvial donut for bacteria
 #
-
 # svg("figs/alluvial-donut-resident-16S.svg", h = 12, w = 24)
-# names(bac_tax_color) <- bac_tax_order
-putative_prey %>%
-  # Resident only
-  filter(EUK_DIST.A != "Cosmopolitan") %>% 
-ggplot(aes(axis1 = LEVEL2ORDER, axis2 = TAX_ORDER_BAC, y = count_sum)) +
-  scale_x_discrete(limits = c("TAX_SHORT.A", "TAX_ORDER_BAC"), expand = c(0.5, 0)) +
-  geom_alluvium(aes(fill = TAX_ORDER_BAC), 
+ggplot(bac_resident_putative_prey, aes(axis1 = LEVEL2ORDER, axis2 = BAC_RES, y = count_sum)) +
+  scale_x_discrete(limits = c("TAX_SHORT.A", "BAC_RES"), expand = c(0.5, 0)) +
+  geom_alluvium(aes(fill = BAC_RES), 
                 alpha = 1, width = 1/10, color = "black") +
   geom_stratum(width = 1/4, alpha = 1, color = "black", aes(fill = TAX_ORDER_BAC)) +
-  scale_fill_manual(values = bac_tax_color) +
-  ggrepel::geom_text_repel(stat = "stratum", aes(label = after_stat(stratum)), size = 6, color = "black", direction = "y", nudge_x = .5) +
+  scale_fill_manual(values = bac_col_res) +
+  ggrepel::geom_text_repel(stat = "stratum", 
+                           aes(label = str_wrap(after_stat(stratum),6)), force = 1,
+                           size = 4, color = "black", 
+                           direction = "y", nudge_x = .4) +
   coord_polar("y", start=0) +
   theme_void() +
   theme(legend.title = element_blank()) +
-  labs(title = "Resident interactions")
+  labs(title = "Resident interactions") +
+  guides(fill=guide_legend(ncol=1))
 # dev.off()
 
 # svg("figs/alluvial-donut-cosmopolitan-16S.svg", h = 12, w = 24)
-putative_prey %>%
-  # Resident only
-  filter(EUK_DIST.A == "Cosmopolitan") %>% 
-ggplot(aes(axis1 = LEVEL2ORDER, axis2 = TAX_ORDER_BAC, y = count_sum)) +
-  scale_x_discrete(limits = c("TAX_SHORT.A", "TAX_ORDER_BAC"), expand = c(0.5, 0)) +
-  geom_alluvium(aes(fill = TAX_ORDER_BAC), 
+ggplot(bac_cosmo_putative_prey, aes(axis1 = LEVEL2ORDER, axis2 = BAC_COS, y = count_sum)) +
+  scale_x_discrete(limits = c("TAX_SHORT.A", "BAC_COS"), expand = c(0.5, 0)) +
+  geom_alluvium(aes(fill = BAC_COS), 
                 alpha = 1, width = 1/10, color = "black") +
   geom_stratum(width = 1/4, alpha = 1, color = "black", aes(fill = TAX_ORDER_BAC)) +
-  scale_fill_manual(values = bac_tax_color) +
-  ggrepel::geom_text_repel(stat = "stratum", aes(label = after_stat(stratum)), size = 6, color = "black", direction = "y", nudge_x = .5) +
+  scale_fill_manual(values = bac_col_cos) +
+  ggrepel::geom_text_repel(stat = "stratum", 
+                           aes(label = str_wrap(after_stat(stratum),6)), force = 1,
+                           size = 4, color = "black", 
+                           direction = "y", nudge_x = .4) +
   coord_polar("y", start=0) +
   theme_void() +
   theme(legend.title = element_blank()) +
-  labs(title = "Cosmopolitan interactions")
+  labs(title = "Cosmopolitan interactions") +
+  guides(fill=guide_legend(ncol=1))
 # dev.off()
 ```
 
@@ -2639,7 +2603,6 @@ unique(gr_env$Grazing_variable)
 
 ```{r Regression}
 library(broom)
-# View(gr_env)
 regression_gr_tmp <- gr_env %>%
   filter(!(Env_variable == "DEPTH")) %>%
   filter(!is.na(env_value)) %>%
