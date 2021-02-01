@@ -14,6 +14,12 @@ output:
   pdf_document:
     toc: true
     toc_depth: '3'
+    
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
 ---
 
 ```{r setup, include=FALSE}
@@ -680,11 +686,12 @@ passfail_wide$PercLossSeq <- paste(100*(passfail_wide$Fail/(passfail_wide$Fail+p
 # ?prune_taxa
 # class(keep_asvs)
 physeq_tmp <- prune_taxa(keep_asvs, physeq_names)
-# sample_data(physeq_tmp)
+sample_data(physeq_tmp)
 
 # Remove one sample with too few sequences
-physeq_clean <- subset_samples(physeq_tmp, sample_names(physeq_tmp) !="GordaRidge_BSW020_sterivex_2019_REPa")
-# sample_data(physeq_clean)
+physeq_clean <- subset_samples(physeq_tmp, 
+                               sample_names(physeq_tmp) !="GordaRidge_BSW020_sterivex_2019_REPa")
+sample_data(physeq_clean)
 # physeq_clean
 # Remove control samples from data frame
 tmp <- subset(GR_tagseq_longformat, !(SAMPLEID %in% "CTRL")) # Remove controls, get list of sample names that are controls
@@ -1019,7 +1026,7 @@ ventnames <- read.delim("data-input/ventnames-gordaridge.txt")
 library(reshape2); 
 library(vegan); 
 library(dplyr)
-library(ade4); 
+# library(ade4); 
 library(compositions); 
 library(tidyverse)
 library(purrr)
