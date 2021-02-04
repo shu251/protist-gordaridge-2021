@@ -2,7 +2,7 @@
 
 Associated code for data analysis, amplicon sequence processing, and figure generation for _in prep_ manuscript entitled **Protistan grazing impacts microbial communities and carbon cycling at deep-sea hydrothermal vents**.   
 
-Hu, S.K., Herrera, E., Smith, A., Pachiadaki, M.G., Edgcomb, V.P., Sylva, S.P., et al. (_In prep_) Protistan grazing impacts microbial communities and carbon cycling at deep-sea hydrothermal vents.   
+Hu, S.K., Herrera, E., Smith, A., Pachiadaki, M.G., Edgcomb, V.P., Sylva, S.P., Chan, E.W., Seewald, J.S., German, C.R., & Huber, J.A. (_In prep_) Protistan grazing impacts microbial communities and carbon cycling at deep-sea hydrothermal vents.   
 
 
 ### [All code and analyses presented here.](https://shu251.github.io/protist-gordaridge-2021/)
