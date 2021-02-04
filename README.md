@@ -2,31 +2,39 @@
 
 Associated code for data analysis, amplicon sequence processing, and figure generation for _in prep_ manuscript entitled **Protistan grazing impacts microbial communities and carbon cycling at deep-sea hydrothermal vents**.   
 
-Hu, S.K., Herrera, E., Smith, A., Pachiadaki, M.G., Edgcomb, V.P., Sylva, S.P., et al. (In prep) Protistan grazing impacts microbial communities and carbon cycling at deep-sea hydrothermal vents.   
+Hu, S.K., Herrera, E., Smith, A., Pachiadaki, M.G., Edgcomb, V.P., Sylva, S.P., et al. (_In prep_) Protistan grazing impacts microbial communities and carbon cycling at deep-sea hydrothermal vents.   
 
 
-[All code and analyses present here.](https://shu251.github.io/protist-gordaridge-2021/)
+### [All code and analyses presented here.](https://shu251.github.io/protist-gordaridge-2021/)
 
 ### Description of contents
 
-#### 1. Set up and introduce study
+#### 1. Study background :ocean::volcano:
 
-Microbial eukaryotes (or protists) in marine ecosystems are a link between microbial primary producers and all higher trophic levels. The rate at which heterotrophic protistan grazers consume microbial prey and recycle organic matter is an important component of marine microbial food webs and carbon cycling. At deep-sea hydrothermal vents, chemosynthetic bacteria and archaea form the basis of a food web in the absence of sunlight, but the role of protistan grazers in these highly productive ecosystems is largely unexplored. Here, we paired grazing experiments with a molecular survey to quantify protistan grazing and to characterize the composition of vent-associated protists in low-temperature venting fluids from Gorda Ridge in the North East (NE) Pacific Ocean. Results revealed protists exert higher predation pressure at vents compared to the surrounding deep seawater environment and may account for consuming 28-62% of the daily stock of prokaryotic biomass within the hydrothermal vent food web. The vent-associated protistan community was more species rich relative to the background deep sea, and patterns in the distribution and co-occurrence of vent microbes provided additional insights into potential predator-prey interactions. Ciliates, followed by dinoflagellates, Syndiniales, rhizaria, and stramenopiles dominated the vent protist community and included bacterivorous species, species known to host symbionts, and parasites. Our findings provide an estimate of protistan grazing pressure within hydrothermal vent food webs, highlighting the role that diverse deep-sea protistan communities have in carbon cycling.
+Microbial eukaryotes (or protists) in marine ecosystems are a link between microbial primary producers and all higher trophic levels. The rate at which heterotrophic protistan grazers consume microbial prey and recycle organic matter is an important component of marine microbial food webs and carbon cycling. At deep-sea hydrothermal vents, chemosynthetic bacteria and archaea form the basis of a food web in the absence of sunlight, but the role of protistan grazers in these highly productive ecosystems is largely unexplored.
+Code presented here is for the analysis of grazing experiments, where hydrothermal vent fluid was used in grazing incubations, and amplicon sequences to characterize the protistan and prokaryotic communities associated with the hydrothermal vent environment.
 
-#### 2. Working R environment
+#### 2. Working R environment :computer::yarn:
 
-Using R version 3.6.1
+Using R version 3.6.1 with RMarkdown.
 
-#### 3. Grazing experiment
+#### 3. Grazing experiment :test_tube::microscope:
 
+Description of code that imports raw cell count information (derived from microscopy counts) and processes this information to determine FLP per eukaryotic cell and downstream estimates of grazing impact.
 
-#### 4. Process 18S rRNA gene amplicons
+#### 4. Process 18S rRNA gene amplicons :dna::soap:
 
-#### Characterize protist diversity
+Imports raw Amplicon Sequence Variant (ASV) count files, conducted 'decontam' to remove potential contaminate ASVs, and quality checks taxonomy assignment.
 
-#### Classify protist distribution
+#### Characterize protist diversity :toolbox::bar_chart:
 
-#### Protistan distribution and diversity across samples
+Analysis of protist community structure and diversity by averaging across replicate samples, summing to individual taxonomic groups for visualization purposes, and ordination analysis to explore sample-to-sample differences.
+
+#### Classify protist distribution :ocean::cocktail:
+
+18S rRNA gene derived ASVs were classified based on their distribution among samples. ASVs found throughout the entire hydrothermal vent system, including the background seawater environment were classified as 'cosmopolitan'. 'Resident' ASVs were those found only within the hydrothermal vent fluid.
+
+#### Protistan distribution and diversity across samples :card_index_dividers::ocean:
 
 #### Process 16S rRNA gene amplicons
 
