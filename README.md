@@ -22,33 +22,78 @@ Using R version 3.6.1 with RMarkdown.
 
 Description of code that imports raw cell count information (derived from microscopy counts) and processes this information to determine FLP per eukaryotic cell and downstream estimates of grazing impact.
 
+* Import results from cell counts (cells / ml)
+* Quality check input data and reformat
+* Determine microscopy count error rate
+* Determine which time points have significant differences in FLP over time
+* Calculate grazing effect, rate, and prokaryote turnover percentage
+* Estimate percent turnover with respect to carbon
+* Generate Figure 1
+
 #### 4. Process 18S rRNA gene amplicons :dna::soap:
 
 Imports raw Amplicon Sequence Variant (ASV) count files, conducted 'decontam' to remove potential contaminate ASVs, and quality checks taxonomy assignment.
 
-#### Characterize protist diversity :toolbox::bar_chart:
+* Import and reformat ASV table
+* Use [decontam](https://microbiomejournal.biomedcentral.com/articles/10.1186/s40168-018-0605-2) to remove contaminants
+* Reformat for downstream analyses
+
+#### 5. Characterize protist diversity :toolbox::bar_chart:
 
 Analysis of protist community structure and diversity by averaging across replicate samples, summing to individual taxonomic groups for visualization purposes, and ordination analysis to explore sample-to-sample differences.
 
-#### Classify protist distribution :ocean::cocktail:
+* Curation of assigned taxonomies
+* Reformat counts to determine average counts across replicates
+* Perform PCA analysis
+* Generate Figure 2
+
+
+#### 6. Classify protist distribution :ocean::cocktail:
 
 18S rRNA gene derived ASVs were classified based on their distribution among samples. ASVs found throughout the entire hydrothermal vent system, including the background seawater environment were classified as 'cosmopolitan'. 'Resident' ASVs were those found only within the hydrothermal vent fluid.
 
-#### Protistan distribution and diversity across samples :card_index_dividers::ocean:
+* Categorize ASVs based on distribution
+* Plot ASV distribution by total ASVs and total sequences
 
-#### Process 16S rRNA gene amplicons
+#### 7. Protistan distribution and diversity across samples :card_index_dividers::ocean:
+Code to format taxonomic classification to highlight approximately family or class level, including ASV richness (total ASVs).
 
-#### Network analysis
+* Re-curate taxonomy
+* Determine ASV richness
+* Perform CLR transformation
+* Generate tile plot (Figure 3)
 
-#### Regression analysis
+#### 8. Process 16S rRNA gene amplicons :microbe::dna:
+Similar to 18S rRNA gene tag-sequencing pipeline. Import raw ASV count tables and characterize prokaryote community.
 
+* Curate 16S taxonomy
+* Generate barplot
+* Perform CLR transformation and PCA
+
+#### 9. Network analysis :spider_web:
+
+Import 16S and 18S datasets as phyloseq objects and subsample to select more abundant ASVs from in situ samples. Explore and run [SPIEC-EASI](https://github.com/zdk123/SpiecEasi)
+
+* Run multi-domain SPIEC-EASI analysis (used HPC)
+* Export results as phyloseq object to import back into R locally
+* Import into R
+* Parse significant pairs of 18S-16S ASVs
+* Generate alluvial donut plots to show relationship between putative predator and prey (Figure 4).
+
+#### 10. Regression analysis :chart_with_upwards_trend:
+
+Explore relationship between geochemistry information from each vent site and results from grazing analysis.
+
+* Import and reformat grazing results and environmental parameters
+* Perform linear regression, pull out slope, r2, and intercept
+* Generate plot to explore relationships
 
 ### Graphical comic abstract
 ![vent-comic](figs/GR-comic-protistsession.jpg)
 
 
 #### Last updated
-Feb 1, 2021
+Feb 4, 2021
 
 
 #### Notes on RMarkdown compilation
