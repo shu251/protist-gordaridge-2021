@@ -5,7 +5,7 @@ date: "01/02/2021"
 output: 
   html_document:
     number_sections: true
-    theme: paper
+    theme: yeti
     highlight: kate
     collapsed: false
     toc: true
@@ -29,7 +29,7 @@ knitr::opts_chunk$set(echo = TRUE, cache = TRUE, tidy = TRUE)
 
 # Overview
 
-Hu, S.K., Herrera, E., Smith, A., Pachiadaki, M.G., Edgcomb, V.P., Sylva, S.P., et al. (In prep) Protistan grazing impacts microbial communities and carbon cycling at deep-sea hydrothermal vents.
+Hu, S.K., Herrera, E., Smith, A., Pachiadaki, M.G., Edgcomb, V.P., Sylva, S.P., Chan, E.W., Seewald, J.S., German, C.R., & Huber, J.A. (In review) Protistan grazing impacts microbial communities and carbon cycling at deep-sea hydrothermal vents.
 
 ## Contents
 Code for all data analysis and figure generation, including grazing experiment analysis and sequence data processing.  
@@ -45,8 +45,8 @@ Code for all data analysis and figure generation, including grazing experiment a
 ## Summary of work
 
 _Abstract_: Microbial eukaryotes (or protists) in marine ecosystems are a link between microbial primary producers and all higher trophic levels. The rate at which heterotrophic protistan grazers consume microbial prey and recycle organic matter is an important component of marine microbial food webs and carbon cycling. At deep-sea hydrothermal vents, chemosynthetic bacteria and archaea form the basis of a food web in the absence of sunlight, but the role of protistan grazers in these highly productive ecosystems is largely unexplored. We investigated protistan activity, in the context of hydrothermal vent food web dynamics, in low-temperature venting fluids from Gorda Ridge in the North East (NE) Pacific Ocean. In this study we:   
-* Conducted grazing incubations with hydrothermal vent fluid to quantify protistan predation pressure  
-* Collected samples from _in situ_ and grazing experiments for genetic analysis to characterize the composition of vent-associated protists.  
+- Conducted grazing incubations with hydrothermal vent fluid to quantify protistan predation pressure  
+- Collected samples from _in situ_ and grazing experiments for genetic analysis to characterize the composition of vent-associated protists.  
 
 # Set up working R environment
 The following analysis was performed in **R version 3.6.1**. All input files are available on the [Gorda Ridge GitHub repo](https://github.com/shu251/protist-gordaridge-2021). Data used in analysis is available in ```/data-input/```.
@@ -328,10 +328,88 @@ flp_trend_sig <- flp_long_toplot %>%
     select(-Keep, -excess) %>%
     data.frame
 # flp_trend_sig
+
+# Also generate a control table for this
+flp_trend_sig_ctrls <- flp_long_toplot%>%
+    left_join(keep_status) %>%
+    filter(Tx == "T0" | (Tx %in% t & Keep == "yes")) %>%
+    separate(SAMPLE, c("SampleOrigin", "excess"), sep = "-", remove = FALSE) %>%
+    select(-Keep, -excess) %>%
+    filter(Bottle != "Exp") %>%
+    data.frame
+# View(flp_trend_sig_ctrls)
 ```
 
 > These values are used for all downstream grazing rate calculations, as the loss in FLP was found to exceed the microscopy count error percentage.
 
+There was one exception to the above, where the Candelabra experiment T2 exceeded the error rate, and the control FLP also exceeded the error rate. Due to the change between T0 T1 and T2 in the control Candelabra experiment, this was likely an imprecise collection of T0 (poor mixing of control treatment bottle). Below, the average T0 FLP concentration in the control treatments (excluding Candelabra) was determined, so the T0 value for Candelabra could be corrected.
+```{r Examine % loss in controls overall}
+flp_ctrl_trend <- flp_trend_sig_ctrls %>% 
+  mutate(TimePoint = case_when(
+    Tx == "T0" ~ "T0",
+    Tx == "T2" ~ "TF",
+    Tx == "T1" ~ "TF"
+  )) %>% 
+  select(-Tx, -Bottle, -SampleOrigin, -CountID, -BOTTLE, -SAMPLE, -SAMPLE_ORDER) %>% 
+  pivot_wider(names_from = TimePoint, names_sep = "_", values_from = c(cellmL, sem, Hrs)) %>% 
+  mutate(Perc_loss = 100*((cellmL_T0-cellmL_TF)/cellmL_T0))
+
+flp_ctrl_trend_vent <- flp_ctrl_trend %>% 
+  filter(Vent.name != "Near vent BW") %>% 
+  filter(Vent.name != "Candelabra")
+
+# Extract average set of controls
+flp_controls_t0_avg <- mean((flp_ctrl_trend_vent$cellmL_T0))
+# flp_controls_t0_avg
+```
+Create Figure S3 with corrected T0 FLP concentration. 
+```{r generate Figure S3 corrected, fig.width=7, fig.height=6}
+# head(flp_long_toplot %>% filter(Vent.name == "Candelabra"))
+tmp <- flp_long_toplot %>% 
+  filter(Vent.name == "Candelabra" & Bottle == "Ctrl") %>% 
+  mutate(cellmL = case_when(
+    (Vent.name == "Candelabra" & Bottle == "Ctrl" & Tx == "T0") ~ flp_controls_t0_avg,
+    TRUE ~ cellmL
+  )) %>% add_column(corr = "corrected")
+
+flp_long_to_plot_corr <- flp_long_toplot %>% 
+  add_column(corr = "uncorrected") %>% 
+  rbind(flp_long_toplot %>% 
+  filter(Vent.name == "Candelabra" & Bottle == "Ctrl") %>% 
+  mutate(cellmL = case_when(
+    (Vent.name == "Candelabra" & Bottle == "Ctrl" & Tx == "T0") ~ flp_controls_t0_avg,
+    TRUE ~ cellmL
+  )) %>% add_column(corr = "corrected"))
+
+
+# svg("corrected_flp_FigS3.svg", w=7, h = 6)
+ggplot(flp_long_to_plot_corr, aes(x = Hrs, y = cellmL, fill = SAMPLE_ORDER)) +
+    geom_rect(data = (subset(flp_long_to_plot_corr, Tx %in% "T0")), aes(xmin=0, xmax=40, 
+            ymin=(cellmL - ((PERCENT_ERR/100)*cellmL)), 
+            ymax=(cellmL + ((PERCENT_ERR/100)*cellmL))), color=NA,alpha=0.3) +
+    geom_line(stat = "identity", aes(group = SAMPLE, linetype = corr)) +
+    geom_errorbar(aes(ymin = (cellmL - sem), ymax = (cellmL + sem)), width = 0.1) +
+    geom_point(stat = "identity", size = 3, color = "black", aes(fill = SAMPLE_ORDER, shape = SAMPLE_ORDER)) +
+    scale_y_log10() +
+    scale_fill_manual(values = sample_color) +
+    scale_shape_manual(values = c(23,21,21,21,21)) +
+    scale_linetype_manual(values = c(1,1)) +
+    labs(y = bquote("FLP cells "~mL^-1), x = "Incubation hours") +
+    facet_grid(SAMPLE_ORDER~BOTTLE, scales = "free") +
+    theme_bw() + 
+    theme(panel.grid.minor = element_blank(),
+          legend.title = element_blank(),
+          strip.text.x = element_text(face = "bold", color = "black", hjust = 0, size = 10),
+          strip.text.y = element_text(size = 10),
+          strip.background = element_blank(),
+          panel.background = element_blank(), 
+          panel.border = element_blank(),
+          axis.line = element_line(colour = "black"),
+          axis.text = element_text(color = "black", size = 9))
+# dev.off()
+```
+
+Generate plot that reports the FLP loss in the significant experimental treatments.
 ```{r Plot significant FLP loss, fig.width=5, fig.height=3}
 # Factor for plotting
 ## use characterise lists from above
@@ -496,7 +574,6 @@ graze_rate_wCarbon <- graze_rate %>%
     upper_mcnichol_mcnic = 100*(ugC_L_perday_mcnic / 321.4)
   ) %>% 
   data.frame
-# View(graze_rate_wCarbon)
 # write_delim(graze_rate_wCarbon, path = "Grazing-calc-wCarbon-results.txt", delim = "\t")
 ```
 
@@ -900,7 +977,7 @@ supp_table_ASV <- gr_counts_avg_wtax %>%
 Plot factoring and parameters, ahead of bar plot (Figure 2)
 ```{r factor for plotting}
 level2ORDER <- c("Alveolata-Ciliates","Alveolata-Dinoflagellates","Alveolata-Syndiniales","Alveolata-Other","Rhizaria-Cercozoa","Rhizaria-Radiolaria","Rhizaria-Other","Stramenopiles-MAST","Stramenopiles-Ochrophyta","Stramenopiles-Bicoecea","Stramenopiles-Other","Hacrobia-Cryptophyta","Hacrobia-Haptophyta","Hacrobia-Other","Amoebozoa","Excavata","Apusozoa","Archaeplastida-Chlorophyta","Archaeplastida-Other","Opisthokonta-Fungi","Opisthokonta-Metazoa","Opisthokonta-Other","Unassigned-Eukaryote")
-level2ORDER_LABEL <- c("Alveolates-Ciliates","Alveolates-Dinoflagellates","Alveolates-Syndiniales","Alveolates-Other","Rhizaria-Cercozoa","Rhizaria-Radiolaria","Rhizaria-Other","Stramenopiles-MAST","Stramenopiles-Ochrophyta","Stramenopiles-Bicoecea","Stramenopiles-Other","Hacrobia-Cryptophyta","Hacrobia-Haptophyta","Hacrobia-Other","Amoebozoa","Excavates","Apusozoa","Archaeplastid-Chlorophyta","Archaeplastid-Other","Opisthokont-Fungi","Opisthokont-Metazoa","Opisthokont-Other","Unassigned-Eukaryote")
+level2ORDER_LABEL <- c("Alveolates-Ciliates","Alveolates-Dinoflagellates","Alveolates-Syndiniales","Alveolates-Other","Rhizaria-Cercozoa","Rhizaria-Radiolaria","Rhizaria-Other","Stramenopiles-MAST","Stramenopiles-Ochrophytes","Stramenopiles-Bicoecea","Stramenopiles-Other","Hacrobia-Cryptophytes","Hacrobia-Haptophytes","Hacrobia-Other","Amoebozoa","Excavates","Apusozoa","Archaeplastid-Chlorophytes","Archaeplastid-Other","Opisthokont-Fungi","Opisthokont-Metazoa","Opisthokont-Other","Unassigned-Eukaryote")
 level2color <- c("#f1eef6","#d7b5d8","#df65b0","#ce1256","#fc9272","#ef3b2c","#800026","#fff7bc","#fec44f","#d95f0e","#a63603","#74c476","#238b45","#00441b","#7fcdbb","#084081","#c6dbef","#2b8cbe","#016c59","#bcbddc","#807dba","#54278f","#bdbdbd", "black")
 gr_counts_avg_TAXA$LEVEL2ORDER <- factor(gr_counts_avg_TAXA$Taxa, 
                                          levels=level2ORDER,
@@ -981,17 +1058,22 @@ barplot_lev2_wreps(gr_counts_wreps_TAXA)
 
 Bar plot for Figure 2.
 ```{r Figure generation-all, fig.height = 8, fig.width = 10}
-insitu <- c("sterivex", "SUPR")
 rm <- c("Unassigned", "Opisthokonta-Other", "Opisthokonta-Fungi", "Opisthokonta-Metazoa")
-
 nometaz_all <- barplot_lev2(filter(gr_counts_avg_TAXA, !(Taxa %in% rm)))
 nometaz_all
 ```
 
-Additional plot with metazoa. _Not report in manuscript_.
-```{r Supplemental plot with metazoa, fig.height = 8, fig.width = 10}
+Generate protist bar plot with only in situ samples for presentation purposes and an additional plot with metazoa. _Not report in manuscript_.
+```{r Supplemental plot with metazoa, fig.height = 8, fig.width = 8}
 # svg("figs/SUPPLEMENTARY-GR-tax-barplot-wmetaz.svg", w = 10, h = 8)
-barplot_lev2(filter(gr_counts_avg_TAXA))
+# barplot_lev2(filter(gr_counts_avg_TAXA))
+# dev.off()
+
+# rm <- c("Unassigned", "Opisthokonta-Other", "Opisthokonta-Fungi", "Opisthokonta-Metazoa")
+# insitu <- c("sterivex", "SUPR")
+# head(gr_counts_avg_TAXA)
+# svg("figs/GR-tax-barplot-insitu-only.svg", w = 8, h = 8)
+# barplot_lev2(filter(gr_counts_avg_TAXA, !(Taxa %in% rm) & SAMPLEID %in% insitu))
 # dev.off()
 ```
 
@@ -1546,7 +1628,7 @@ asv_seq_taxa2 <- gr_tax_res %>%
 ```
 
 ID most abundant ASVs
-```{r, warning=FALSE, message=FALSE}
+```{r Isolate most abundant ASVs, warning=FALSE, message=FALSE}
 # What are the most abundant ASVs in each of the taxa2 categories?
 gr_topASV_taxa2 <- gr_tax_res %>% 
   select(Feature.ID, RES_COSMO = DIST_simple, Taxa, Taxa2, Taxon_updated, COUNT_AVG) %>%
@@ -1652,7 +1734,8 @@ gr_relAbun_toheat <- gr_relAbun_toheat_ONE %>%
 ```{r Factor for tile plot}
 # Re-factor
 tax2_order_all <- c("Colpodea","Heterotrichea","Karyorelictea","Litostomatea","Nassophorea","Oligohymenophorea","Phyllopharyngea","Plagiopylea","Prostomatea","Spirotrichea-Choreotrichida","Spirotrichea-Euplotia","Spirotrichea-Hypotrichia","Spirotrichea-Other","Spirotrichea-Strombidiida","Spirotrichea-Tintinnida","Ciliates-Other","Gonyaulacales","Gymnodiniales","Noctilucales","Peridiniales","Prorocentrales","Suessiales","Torodiniales","Apicomplexa","Syndiniales Dino-Groups (I-V)","Alveolata-Other","Amoebozoa","Breviatea","Lobosa","Apusomonadidae","Apusozoa","Hilomonadea","Mantamonadidea","Discoba","Metamonada","Hacrobia-Cryptophyta","Hacrobia-Haptophyta","Centroheliozoa","Katablepharidophyta","Picozoa","Telonemia","Hacrobia-Other","Archaeplastida-Chlorophyta","Archaeplastida-Streptophyta","Archaeplastida-Other","Ascomycota","Basidiomycota","Chytridiomycota","Microsporidiomycota","Opisthokonta-Fungi","Annelida","Arthropoda","Cnidaria","Craniata","Ctenophora","Echinodermata","Gastrotricha","Mollusca","Nematoda","Nemertea","Opisthokonta-Metazoa","Platyhelminthes","Porifera","Rotifera","Urochordata","Choanoflagellatea","Filasterea","Ichthyosporea","Opisthokonta-Other","Endomyxa","Filosa","Filosa-Granofilosea","Filosa-Imbricatea","Filosa-Sarcomonadea","Filosa-Thecofilosea","Rhizaria-Cercozoa","Polycystinea-Collodaria","Polycystinea-Nassellaria","Polycystinea-Spumellarida","RAD-A","RAD-B","RAD-C","Rhizaria-Acantharea","Rhizaria-Radiolaria","Rhizaria-Other","MAST","Bacillariophyta","Bolidophyceae","Chrysophyceae","Dictyochophyceae","MOCH","Pelagophyceae","Synurophyceae","Caecitellaceae", "Cafeteriaceae","Stramenopiles-Other","Unassigned-Eukaryote")
-gr_relAbun_toheat$TAXA2_ORDER <- factor(gr_relAbun_toheat$Taxa2, levels = rev(tax2_order_all))
+tax2_LABEL_all <- c("Colpodea","Heterotrichea","Karyorelictea","Litostomatea","Nassophorea","Oligohymenophorea","Phyllopharyngea","Plagiopylea","Prostomatea","Spirotrichea-Choreotrichida","Spirotrichea-Euplotia","Spirotrichea-Hypotrichia","Spirotrichea-Other","Spirotrichea-Strombidiida","Spirotrichea-Tintinnida","Ciliates-Other","Gonyaulacales","Gymnodiniales","Noctilucales","Peridiniales","Prorocentrales","Suessiales","Torodiniales","Apicomplexa","Syndiniales Dino-Groups (I-V)","Alveolates-Other","Amoebozoa","Breviatea","Lobosa","Apusomonadidae","Apusozoa","Hilomonadea","Mantamonadidea","Discoba","Metamonada","Hacrobia-Cryptophytes","Hacrobia-Haptophytes","Centroheliozoa","Katablepharidophyta","Picozoa","Telonemia","Hacrobia-Other","Archaeplastid-Chlorophytes","Archaeplastid-Streptophytes","Archaeplastid-Other","Ascomycota","Basidiomycota","Chytridiomycota","Microsporidiomycota","Opisthokonta-Fungi","Annelida","Arthropoda","Cnidaria","Craniata","Ctenophora","Echinodermata","Gastrotricha","Mollusca","Nematoda","Nemertea","Opisthokonta-Metazoa","Platyhelminthes","Porifera","Rotifera","Urochordata","Choanoflagellatea","Filasterea","Ichthyosporea","Opisthokonta-Other","Endomyxa","Filosa","Filosa-Granofilosea","Filosa-Imbricatea","Filosa-Sarcomonadea","Filosa-Thecofilosea","Rhizaria-Cercozoa","Polycystine-Collodaria","Polycystine-Nassellaria","Polycystine-Spumellarida","RAD-A","RAD-B","RAD-C","Rhizaria-Acantharea","Rhizaria-Radiolaria","Rhizaria-Other","MAST","Bacillariophyta","Bolidophyceae","Chrysophyceae","Dictyochophyceae","MOCH","Pelagophyceae","Synurophyceae","Caecitellaceae", "Cafeteriaceae","Stramenopiles-Other","Unassigned-Eukaryote")
+gr_relAbun_toheat$TAXA2_ORDER <- factor(gr_relAbun_toheat$Taxa2, levels = rev(tax2_order_all), labels = rev(tax2_LABEL_all))
 
 broad_taxa_order <- c("Alveolata-Ciliates","Alveolata","Rhizaria",
                       "Stramenopiles","Amoebozoa","Apusozoa",
@@ -1740,13 +1823,25 @@ tile_tax_CLR <- ggplot(gr_relAbun_toheat, aes(x = SAMPLENAME,
 Figure 3 plot
 ```{r Tile plot with CLR, fig.height=8, fig.width=16}
 green_pink <- c("#8e0152","#c51b7d","#de77ae","#f1b6da","#f7f7f7","#b8e186","#7fbc41","#4d9221","#276419")
-# svg("figs/Tileplot-CLR-02-02-2021.svg", h = 8, w = 16)
+# svg("figs/Tileplot-CLR-21-04-2021.svg", h = 8, w = 16)
 plot_grid(
   tile_tax_CLR %+% subset(gr_relAbun_toheat, RelAbun_Taxa2 > 0) +
   scale_fill_gradientn(colors = rev(green_pink), na.value = NA),
   richness_plot, ncol = 2, axis = c("tb"), align = c("hv"))
 # dev.off()
 ```
+
+Extra tile plot for presentations with the insitu samples only.
+```{r In situ only tile plot extra, fig.height=8, fig.width=13}
+# head(gr_relAbun_toheat)
+# svg("insitu-tileplot.svg", h=8, w = 13)
+# plot_grid(
+#   tile_tax_CLR %+% subset(gr_relAbun_toheat, (RelAbun_Taxa2 > 0 & grepl("in situ", SAMPLENAME))) +
+#   scale_fill_gradientn(colors = rev(green_pink), na.value = NA),
+#   richness_plot, ncol = 2, axis = c("tb"), align = c("hv"))
+# dev.off()
+```
+
 
 # Process 16S rRNA amplicon
 
@@ -2391,15 +2486,15 @@ putative_prey <- tax_sum_interact %>%
   group_by(TAX_SHORT.A, TAX_SHORT.B, EUK_DIST.A) %>% 
   summarise(count_sum = sum(COUNT)) %>% 
   data.frame
-# table(putative_prey$EUK_DIST.A)
 
-level2ORDER <- c("Alveolata-Ciliates","Alveolata-Dinoflagellates","Alveolata-Syndiniales","Alveolata-Other","Rhizaria-Cercozoa","Rhizaria-Radiolaria","Rhizaria-Other","Stramenopiles-MAST","Stramenopiles-Ochrophyta","Stramenopiles-Other","Hacrobia-Cryptophyta","Hacrobia-Haptophyta","Hacrobia-Other","Amoebozoa","Excavata","Apusozoa","Archaeplastida-Chlorophyta","Archaeplastida-Other","Opisthokonta-Fungi","Opisthokonta-Metazoa","Opisthokonta-Other","Unassigned-Eukaryote") 
-level2ORDER_labels <- c("Alveolates-Ciliates","Alveolates-Dinoflagellates","Alveolates-Syndiniales","Alveolates-Other","Rhizaria-Cercozoa","Rhizaria-Radiolaria","Rhizaria-Other","Stramenopiles-MAST","Stramenopiles-Ochrophyta","Stramenopiles-Other","Hacrobia-Cryptophyta","Hacrobia-Haptophyta","Hacrobia-Other","Amoebozoa","Excavates","Apusozoa","Archaeplastid-Chlorophyta","Archaeplastid-Other","Opisthokont-Fungi","Opisthokont-Metazoa","Opisthokont-Other","Unassigned-Eukaryote")
-level2color <- c("#fa9fb5","#d7b5d8","#c994c7","#ce1256","#fc9272","#ef3b2c","#800026","#fff7bc","#fec44f","#d95f0e","#74c476","#238b45","#00441b","#7fcdbb","#084081","#c6dbef","#2b8cbe","#016c59","#bcbddc","#807dba","#54278f","#bdbdbd")
+alluvial_level2order <- c("Alveolata-Ciliates","Alveolata-Dinoflagellates","Alveolata-Syndiniales","Rhizaria-Cercozoa","Rhizaria-Radiolaria","Stramenopiles-MAST","Stramenopiles-Ochrophyta","Stramenopiles-Other","Hacrobia-Cryptophyta","Hacrobia-Haptophyta","Hacrobia-Other", "Archaeplastida-Chlorophyta")
+alluvial_level2labels <-c("Alveolates-Ciliates","Alveolates-Dinoflagellates","Alveolates-Syndiniales","Rhizaria-Cercozoa","Rhizaria-Radiolaria","Stramenopiles-MAST","Stramenopiles-Ochrophytes","Stramenopiles-Other","Hacrobia-Cryptophytes","Hacrobia-Haptophytes","Hacrobia-Other", "Archaeplastid-Chlorophytes")
+alluvial_level2colors <- c("#f1eef6","#d7b5d8","#df65b0","#fc9272","#ef3b2c","#fff7bc","#fec44f","#a63603","#74c476","#238b45","#00441b", "#2b8cbe")
 putative_prey$LEVEL2ORDER <- factor(putative_prey$TAX_SHORT.A, 
-                                    levels=level2ORDER,
-                                    labels = level2ORDER_labels)
-names(level2color)<-level2ORDER_labels
+                                    levels = alluvial_level2order,
+                                    labels = alluvial_level2labels)
+names(alluvial_level2colors) <- alluvial_level2labels
+
 
 # Add line for prokaryotes
 donut_joint_tax <- c("Alveolata-Ciliates","Alveolata-Dinoflagellates","Alveolata-Syndiniales","Alveolata-Other","Rhizaria-Cercozoa","Rhizaria-Radiolaria","Rhizaria-Other","Stramenopiles-MAST","Stramenopiles-Ochrophyta","Stramenopiles-Other","Hacrobia-Cryptophyta","Hacrobia-Haptophyta","Hacrobia-Other","Amoebozoa","Excavata","Apusozoa","Archaeplastida-Chlorophyta","Archaeplastida-Other","Opisthokonta-Fungi","Opisthokonta-Metazoa","Opisthokonta-Other","Unassigned-Eukaryote", "Epsilonbacteraeota-Arcobacter","Epsilonbacteraeota-Caminibacter","Epsilonbacteraeota-Campylobacter","Epsilonbacteraeota-Hydrogenimonas","Epsilonbacteraeota-Nitratifractor","Epsilonbacteraeota-Nitratiruptor","Epsilonbacteraeota-Sulfurimonas","Epsilonbacteraeota-Sulfurovum","Proteobacteria-Alphaproteobacteria","Proteobacteria-Deltaproteobacteria","Proteobacteria-Gammaproteobacteria","Proteobacteria-Methylococcales","Proteobacteria-Oceanospirillales","Proteobacteria-SUP05 cluster","Acidobacteria","Actinobacteria","Aquificae","Bacteroidetes","Chloroflexi","Thaumarchaeota-Nitrososphaeria","Euryarchaeota-Thermoplasmata","Fusobacteria-Psychrilyobacter","Marinimicrobia (SAR406 clade)","Nitrospinae-Nitrospinaceae","Other")
@@ -2419,7 +2514,7 @@ ggplot(aes(axis1 = LEVEL2ORDER, axis2 = TAX_ORDER_BAC, y = count_sum)) +
   scale_x_discrete(limits = c("TAX_SHORT.A", "TAX_SHORT.B"), expand = c(0.5, 0)) +
   geom_alluvium(aes(fill = LEVEL2ORDER), 
                 alpha = 1, width = 1/10, color = "black") +
-  scale_fill_manual(values = level2color) +
+  scale_fill_manual(values = alluvial_level2colors, drop = F) +
   geom_stratum(width = 1/4, alpha = 1, color = "black", aes(fill = LEVEL2ORDER)) +
   ggrepel::geom_text_repel(stat = "stratum", 
                            aes(label = str_wrap(after_stat(stratum),6)), force = 1,
@@ -2440,7 +2535,7 @@ ggplot(aes(axis1 = LEVEL2ORDER, axis2 = TAX_ORDER_BAC, y = count_sum)) +
   scale_x_discrete(limits = c("TAX_SHORT.A", "TAX_SHORT.B"), expand = c(0.5, 0)) +
   geom_alluvium(aes(fill = LEVEL2ORDER),
                 alpha = 1, width = 1/10, color = "black") +
-  scale_fill_manual(values = level2color) +
+  scale_fill_manual(values = alluvial_level2colors, drop = F) +
   geom_stratum(width = 1/4, alpha = 1, color = "black", aes(fill = LEVEL2ORDER)) +
   ggrepel::geom_text_repel(stat = "stratum", 
                            aes(label = str_wrap(after_stat(stratum),6)), force = 1,
