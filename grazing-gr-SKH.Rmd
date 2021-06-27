@@ -1,11 +1,11 @@
 ---
-title: "Gorda Ridge data analysis SKH"
+title: "Gorda Ridge data analysis"
 author: "Sarah K. Hu"
 date: "01/02/2021"
 output: 
   html_document:
     number_sections: true
-    theme: yeti
+    theme: cosmo
     highlight: kate
     collapsed: false
     toc: true
@@ -25,31 +25,35 @@ knit: (function(input_file, encoding) {
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, cache = TRUE, tidy = TRUE)
 ```
+
 **Protistan grazing impacts microbial communities and carbon cycling at deep-sea hydrothermal vents**
 
 # Overview
 
-Hu, S.K., Herrera, E., Smith, A., Pachiadaki, M.G., Edgcomb, V.P., Sylva, S.P., Chan, E.W., Seewald, J.S., German, C.R., & Huber, J.A. (In review) Protistan grazing impacts microbial communities and carbon cycling at deep-sea hydrothermal vents.
+Hu, S.K., Herrera, E., Smith, A., Pachiadaki, M.G., Edgcomb, V.P., Sylva, S.P., Chan, E.W., Seewald, J.S., German, C.R., & Huber, J.A. (In press) Protistan grazing impacts microbial communities and carbon cycling at deep-sea hydrothermal vents. *PNAS*
 
 ## Contents
-Code for all data analysis and figure generation, including grazing experiment analysis and sequence data processing.  
 
-- Import raw counts from FLP disappearance experiments
-- Perform calculations to estimate grazing pressure
-- Generate figures to visualize grazing pressure
-- Import and quality control 18S and 16S tag-sequencing data
-- Taxonomy curation
-- Statistical analyses
-- Figure generation
+Code for all data analysis and figure generation, including grazing experiment analysis and sequence data processing.
+
+-   Import raw counts from FLP disappearance experiments
+-   Perform calculations to estimate grazing pressure
+-   Generate figures to visualize grazing pressure
+-   Import and quality control 18S and 16S tag-sequencing data
+-   Taxonomy curation
+-   Statistical analyses
+-   Figure generation
 
 ## Summary of work
 
-_Abstract_: Microbial eukaryotes (or protists) in marine ecosystems are a link between microbial primary producers and all higher trophic levels. The rate at which heterotrophic protistan grazers consume microbial prey and recycle organic matter is an important component of marine microbial food webs and carbon cycling. At deep-sea hydrothermal vents, chemosynthetic bacteria and archaea form the basis of a food web in the absence of sunlight, but the role of protistan grazers in these highly productive ecosystems is largely unexplored. We investigated protistan activity, in the context of hydrothermal vent food web dynamics, in low-temperature venting fluids from Gorda Ridge in the North East (NE) Pacific Ocean. In this study we:   
-- Conducted grazing incubations with hydrothermal vent fluid to quantify protistan predation pressure  
-- Collected samples from _in situ_ and grazing experiments for genetic analysis to characterize the composition of vent-associated protists.  
+*Abstract*: Microbial eukaryotes (or protists) in marine ecosystems are a link between microbial primary producers and all higher trophic levels. The rate at which heterotrophic protistan grazers consume microbial prey and recycle organic matter is an important component of marine microbial food webs and carbon cycling. At deep-sea hydrothermal vents, chemosynthetic bacteria and archaea form the basis of a food web in the absence of sunlight, but the role of protistan grazers in these highly productive ecosystems is largely unexplored. We investigated protistan activity, in the context of hydrothermal vent food web dynamics, in low-temperature venting fluids from Gorda Ridge in the North East (NE) Pacific Ocean. In this study we:
+
+-   Conducted grazing incubations with hydrothermal vent fluid to quantify protistan predation pressure\
+-   Collected samples from *in situ* and grazing experiments for genetic analysis to characterize the composition of vent-associated protists.
 
 # Set up working R environment
-The following analysis was performed in **R version 3.6.1**. All input files are available on the [Gorda Ridge GitHub repo](https://github.com/shu251/protist-gordaridge-2021). Data used in analysis is available in ```/data-input/```.
+
+The following analysis was performed in **R version 3.6.1**. All input files are available on the [Gorda Ridge GitHub repo](https://github.com/shu251/protist-gordaridge-2021). Data used in analysis is available in `/data-input/`. ASV tables generated using QIIME2 (with DADA2); raw sequences are publicly available under [BioProject PRJNA637089](https://www.ncbi.nlm.nih.gov/bioproject/PRJNA637089).
 
 ```{r Load libraries, message=FALSE}
 library(tidyverse);library(reshape2);library(cowplot)
@@ -78,7 +82,7 @@ counts_df <- counts %>%
 prok<-read.table("data-input/prok_counts.txt",header=T, fill=T, sep="\t")
 ```
 
-_Correction for sample name_
+*Correction for sample name*
 
 > Sample Plume003, is more appropriately considered near vent bottom water. Modify sample name and entry below.
 
@@ -126,9 +130,10 @@ counts_df_ids <- counts_df_mod %>%
 ```
 
 ## Calculate error rate
+
 Counts from Vent sample 110 T0 control were repeated three times (3 separate slides). Results are used below as technical replicates to estimate the percentage error rate. Calculating error rate is necessary for determining when FLP cells per ml were significantly different from one another.
 
-> By determining error rate from microscopy counting we can be more confident in evaluating true differences in values. 
+> By determining error rate from microscopy counting we can be more confident in evaluating true differences in values.
 
 ```{r Determine error rate, message=FALSE}
 # This is the % max and min that we will consider to be a margin of error
@@ -145,7 +150,9 @@ PERCENT_ERR <- tech_check[["ERR_PER"]]; PERCENT_ERR # Change in FLP time point t
 ```
 
 ## Estimate average cells/ml
-Get average FLP concentration across experiment replicates and average cells/ml from prokaryotic counts. 
+
+Get average FLP concentration across experiment replicates and average cells/ml from prokaryotic counts.
+
 ```{r Average across replicates, message=FALSE}
 calc_FLP_avg <- counts_df_ids %>%
     group_by(SampleOrigin, Sample.ID, T, Bottle, Vent.name, Sample, Stain, T1, T2) %>%
@@ -186,7 +193,9 @@ prok_avg <- prok_mod %>%
 
 colnames(t0)
 ```
+
 Calculate percent difference between T0 and T1, and T1 and T2. These will be compared to the percent error rate.
+
 ```{r Percent difference from T0 and timepoints, message=FALSE}
 flp_exp_summary <- t0 %>%
     left_join(t_ex) %>%
@@ -197,10 +206,9 @@ flp_exp_summary <- t0 %>%
     data.frame
 ```
 
-
 ### Find significant differences
 
-Above data frame created lists the T0 FLP concentration and the T1 and T2 separately. The difference between T0 and T1 or T0 and T2 must exceed the percent error rate to be considered a reliable difference. 
+Above data frame created lists the T0 FLP concentration and the T1 and T2 separately. The difference between T0 and T1 or T0 and T2 must exceed the percent error rate to be considered a reliable difference.
 
 ```{r Report percent error}
 # Compare to those that exceed error rate
@@ -242,6 +250,7 @@ flp_long_toplot <- cells_long %>%
 ## Plot FLP loss: all time points
 
 Supplementary plot showing loss in FLP over all time points. Shaded area reports percent error rate from T0.
+
 ```{r Plot average cells/ml with error range}
 # Factor for plotting
 sample_order <- c("Near vent BW","Mt Edwards","Venti latte","Candelabra","SirVentsalot")
@@ -253,8 +262,8 @@ bottle_order <- c("Ctrl", "Exp")
 flp_long_toplot$BOTTLE <- factor(flp_long_toplot$Bottle, levels = bottle_order, labels = c("Control", "Experimental"))
 ```
 
-
 Generate plot with all time points.
+
 ```{r Generate plot, fig.width=7, fig.height=6}
 # svg("figs/Supplementary-FLP-CTRL-PercError-plot.svg", w = 7, h = 6)
 ggplot(flp_long_toplot, aes(x = Hrs, y = cellmL, fill = SAMPLE_ORDER)) +
@@ -283,6 +292,7 @@ ggplot(flp_long_toplot, aes(x = Hrs, y = cellmL, fill = SAMPLE_ORDER)) +
 ```
 
 ## Plot FLP loss: significant only
+
 Subset FLP results to select time points with significant loss in FLP/
 
 ```{r Subset significant time points}
@@ -343,6 +353,7 @@ flp_trend_sig_ctrls <- flp_long_toplot%>%
 > These values are used for all downstream grazing rate calculations, as the loss in FLP was found to exceed the microscopy count error percentage.
 
 There was one exception to the above, where the Candelabra experiment T2 exceeded the error rate, and the control FLP also exceeded the error rate. Due to the change between T0 T1 and T2 in the control Candelabra experiment, this was likely an imprecise collection of T0 (poor mixing of control treatment bottle). Below, the average T0 FLP concentration in the control treatments (excluding Candelabra) was determined, so the T0 value for Candelabra could be corrected.
+
 ```{r Examine % loss in controls overall}
 flp_ctrl_trend <- flp_trend_sig_ctrls %>% 
   mutate(TimePoint = case_when(
@@ -362,7 +373,9 @@ flp_ctrl_trend_vent <- flp_ctrl_trend %>%
 flp_controls_t0_avg <- mean((flp_ctrl_trend_vent$cellmL_T0))
 # flp_controls_t0_avg
 ```
-Create Figure S3 with corrected T0 FLP concentration. 
+
+Create Figure S3 with corrected T0 FLP concentration.
+
 ```{r generate Figure S3 corrected, fig.width=7, fig.height=6}
 # head(flp_long_toplot %>% filter(Vent.name == "Candelabra"))
 tmp <- flp_long_toplot %>% 
@@ -410,6 +423,7 @@ ggplot(flp_long_to_plot_corr, aes(x = Hrs, y = cellmL, fill = SAMPLE_ORDER)) +
 ```
 
 Generate plot that reports the FLP loss in the significant experimental treatments.
+
 ```{r Plot significant FLP loss, fig.width=5, fig.height=3}
 # Factor for plotting
 ## use characterise lists from above
@@ -436,10 +450,9 @@ plot_graze_trends <- ggplot(flp_trend_sig,
 # plot_graze_trends
 ```
 
-
 ## Calculate mortality & grazing rate
 
-**See reference**: Salat, J. and Marrasé, C. (1994) Exponential and linear estimations of grazing on bacteria: effects of changes in the proportion of marked cells. Mar Ecol Prog Ser 104: 205–209.
+**See reference**: Salat, J. and Marrasé, C. (1994) Exponential and linear estimations of grazing on bacteria: effects of changes in the proportion of marked cells. Mar Ecol Prog Ser 104: 205--209.
 
 ```{r Change time point label structure, as each experiments lists T0 or TF, message=FALSE}
 processed_data <- flp_trend_sig %>%
@@ -454,6 +467,7 @@ processed_data <- flp_trend_sig %>%
 ```
 
 Perform all calculations
+
 ```{r Grazing rate calculation}
 # cellmL = prokaryote average cells per ml
 graze_rate <- processed_data %>%
@@ -541,15 +555,16 @@ bar_plot
 
 ## Compile figures for grazing results
 
-Generate Figure 1. 
-```{r Generate panel plot, fig.width=3, fig.height=7}
-# svg("figs/Grazing-results-panel-VERT-15-01-2021.svg", h = 7, w = 3)
+Generate Figure 1.
+
+```{r Generate panel plot, fig.width=3, fig.height=9}
+# svg("figs/Grazing-results-panel-VERT-27-06-2021.svg", h = 9, w = 3)
 plot_grid(plot_graze_trends + theme(legend.position = "none"),
           # mortality,
           # bar_plot,
           mortality + theme(axis.text.x = element_blank()),
-          bar_plot + theme(axis.text.x = element_blank()),
-          axis = c("lrtb"), align = c("hv"), labels = c("a", "b", "c"), nrow = 3, ncol = 1)
+          bar_plot,
+          axis = c("lrtb"), align = c("hv"), labels = c("A", "B", "B"), nrow = 3, ncol = 1)
 # dev.off()
 ```
 
@@ -577,15 +592,13 @@ graze_rate_wCarbon <- graze_rate %>%
 # write_delim(graze_rate_wCarbon, path = "Grazing-calc-wCarbon-results.txt", delim = "\t")
 ```
 
-
 # Process 18S rRNA gene amplicons
 
-Set up working R environment and import 18S ASV table. Modify input tables and import as phyloseq objects in order to perform quality control removal of contaminant ASVs (_decontam_).
+Set up working R environment and import 18S ASV table. Modify input tables and import as phyloseq objects in order to perform quality control removal of contaminant ASVs (*decontam*).
 
 ```{r Import and set up env, message=FALSE, warning=FALSE}
 load("data-input/GR-ASVtables-updatedTax.RData", verbose = TRUE)
 ```
-
 
 ## Clean ASV table with 'decontam'
 
@@ -600,7 +613,9 @@ taxmat <- GR_tagseq_wideformat %>%
 # class(taxmat)
 # head(taxmat)
 ```
+
 Note that Axial ID originates from a laboratory blank sample that was extracted at the same time.
+
 ```{r extract ASV count information}
 asvmat <- GR_tagseq_wideformat %>% 
   select(Feature.ID, starts_with(c("Gorda", "Axial"))) %>% 
@@ -609,6 +624,7 @@ asvmat <- GR_tagseq_wideformat %>%
 ```
 
 Import metadata below and combine with phyloseq object.
+
 ```{r Import as phyloseq object, message=FALSE, echo=FALSE, warning=FALSE}
 row.names(taxmat)<-row.names(asvmat)
 # class(asvmat);class(taxmat)
@@ -642,7 +658,9 @@ physeq_names = merge_phyloseq(physeq, sampledata)
 ```
 
 ### Identify contaminant ASVs
-_Decontam_ will identify putative contaminate ASVs based on the difference in prevalence between control blank and environmental samples. First review the library size or number of sequences within each sample to see how varied the control samples are to the experimental samples.
+
+*Decontam* will identify putative contaminate ASVs based on the difference in prevalence between control blank and environmental samples. First review the library size or number of sequences within each sample to see how varied the control samples are to the experimental samples.
+
 ```{r check library size, fig.height=3, fig.width=5}
 # Decontam:
 physeq_names
@@ -657,8 +675,8 @@ ggplot(data=df, aes(x=Index, y=LibrarySize, fill=Sample_or_Control, shape=LOCATI
   scale_shape_manual(values = c(21,22,23)) +
   theme_bw()
 ```
-> Shows that out of the 3 ship blanks I have, one of the sames has a pretty large library size, otherwise, control samples have very small library sizes.
 
+> Shows that out of the 3 ship blanks I have, one of the sames has a pretty large library size, otherwise, control samples have very small library sizes.
 
 ```{r ID contaminants}
 # Assign negative control designation
@@ -668,6 +686,7 @@ sample_data(physeq_names)$is.neg <- sample_data(physeq_names)$Sample_or_Control 
 contamdf.prev <- isContaminant(physeq_names, method="prevalence", neg="is.neg", threshold = 0.5, normalize = TRUE) 
 table(contamdf.prev$contaminant) # Report number of ASVs IDed as contamintants
 ```
+
 > 0.5 - this threshold will ID contaminants in all samples that are more prevalent in negative controls than in positive samples. In this study, control samples included 1 lab-based blank and 3 ship-board blanks taken at the time of field study. Results showed 34 ASVs to be considered "contaminants"
 
 ```{r incorporate contaminant info into phyloseq}
@@ -681,6 +700,7 @@ gr.pa.pos <- prune_samples(sample_data(gr.pa)$Sample_or_Control == "True Sample"
 ```
 
 ### Remove contaminant ASVs from data
+
 ```{r rm contaminants from ASV, message=FALSE, warning=FALSE}
 # Subset TRUE contaminants
 contams <- subset(contamdf.prev, contaminant == "TRUE")
@@ -717,6 +737,7 @@ passfail <- GR_tagseq_longformat %>%
 ```
 
 Report sequence stats
+
 ```{r decontam, message=FALSE, warning=FALSE}
 passfail_wID <- left_join(passfail, ventnames, by = "SAMPLE")
 ```
@@ -754,6 +775,7 @@ passfail_wide$PercLossSeq <- paste(100*(passfail_wide$Fail/(passfail_wide$Fail+p
 ```
 
 Also remove sample with too few sequences and the control samples for an R data file.
+
 ```{r Remove sample with too few sequences}
 # Remove controls
 counts_decont <- counts_decont_tmp %>% 
@@ -763,6 +785,7 @@ counts_decont <- counts_decont_tmp %>%
 ```
 
 ### Save output post-decontam
+
 ```{r Save output}
 # Save as R Data
 save(counts_decont, file="data-input/GR-ASV-table-clean.RData")
@@ -786,6 +809,7 @@ tax_only_tmp <- gr_counts %>%
 ```
 
 Import metadata for all vent sites.
+
 ```{r Import metadata for sample names & Join, message=FALSE, warning=FALSE}
 ventnames <- read.delim("data-input/ventnames-gordaridge.txt")
 colnames(ventnames)[1]<-"SAMPLE"
@@ -799,6 +823,7 @@ gr_counts_name$LocationName[gr_counts_name$LOCATION == "Shipblank"]="Shipblank"
 ```
 
 ## Taxonomy curation - PR2
+
 Function below **pr2_curate()** is the custom manual curation of the taxonomic assignments from the PR2 database. The function creates new columns with taxonomic information that summarizes the core groups in the dataset.
 
 ```{r Revise and explore taxonomy assignment}
@@ -833,11 +858,13 @@ pr2_curate <- function(df){
   return(df)
 }
 ```
+
 Apply PR2 curation to 18S data.
 
 ```{r Run taxonomy curation fxn}
 gr_counts_wtax <- pr2_curate(gr_counts_name)
 ```
+
 > Output is the full ASV table with added columns for curated taxonomy. Above also provides a list of the unique taxonomic names assigned.
 
 ```{r remove control and blank samples}
@@ -853,7 +880,6 @@ gr_counts_filter$SAMPLEID<- sub("SUPRS3", "SUPR", gr_counts_filter$SAMPLEID)
 gr_counts_filter$SAMPLEID<- sub("SUPRS1", "SUPR", gr_counts_filter$SAMPLEID)
 ```
 
-
 ### Report sequence stats after curation
 
 ```{r Sum of all sequences}
@@ -867,16 +893,20 @@ dim(unique(gr_counts_filter %>% filter(!(SAMPLEID == "CTRL")) %>% select(Feature
 ```
 
 Percentage of all sequences Unassigned Eukaryote
+
 ```{r Percent of all sequences Unassigned}
 x <- sum(gr_counts_filter %>% filter(!(SAMPLEID == "CTRL")) %>% filter(Taxon_updated == "Eukaryota") %>% select(COUNT))
 100*(x/a)
 ```
+
 Total ASVs left "Unassigned-Eukaryote"
+
 ```{r ASVs left Unassigned}
 dim(unique(gr_counts_filter %>% filter(!(SAMPLEID == "CTRL")) %>% filter(Taxon_updated == "Eukaryota") %>% select(Feature.ID)))[1]
 ```
 
 Percentage of all sequences assigned Opisthokonts
+
 ```{r Percent of all sequences assigned Opisthokonts}
 x <- sum(gr_counts_filter %>% filter(!(SAMPLEID == "CTRL")) %>% filter(Supergroup == "Opisthokonta") %>% select(COUNT))
 100*(x/a)
@@ -884,7 +914,9 @@ dim(unique(gr_counts_filter %>% filter(!(SAMPLEID == "CTRL")) %>% filter(Supergr
 ```
 
 ## Prepare dataframe to for bar plot
-Average ASV sequence counts across replicate samples, ```COUNT_AVG``` column will now equal the ASV sequence count value across replicates
+
+Average ASV sequence counts across replicate samples, `COUNT_AVG` column will now equal the ASV sequence count value across replicates
+
 ```{r average ASV across replicates, message=FALSE, warning=FALSE}
 gr_counts_avg_wtax <- gr_counts_filter %>%
     mutate(LocationName = case_when(
@@ -903,17 +935,20 @@ gr_counts_avg_wtax <- gr_counts_filter %>%
 ```
 
 Save output file
+
 ```{r Save 18S table with taxonomic curation and averages}
 # save(gr_counts_filter,gr_counts_wtax, gr_counts_avg_wtax, file="data-input/GordaRidge-ASVtable-avg.RData")
 ```
 
 Sum ASV sequence counts to taxonomic level
+
 ```{r Import curated 18S table}
 # See above
 # load(file="data-input/GordaRidge-ASVtable-avg.RData", verbose = T)
 ```
 
 Now sum ASV counts by curated taxonomic level. Below generates both summed sequences from samples averages across replicates and for samples with replicates.
+
 ```{r Sum to curated taxa level, message=FALSE, warning=FALSE}
 # Sum averaged counts at curated taxa level
 gr_counts_avg_TAXA <- gr_counts_avg_wtax %>%
@@ -948,7 +983,8 @@ gr_counts_wreps_TAXA <- gr_counts_filter %>%
     data.frame
 ```
 
-Make supplementary tables to summarize protist results. 
+Make supplementary tables to summarize protist results.
+
 ```{r Make supplementary tables, message=FALSE, warning=FALSE}
 sample_order_all<-c("Shallow seawater in situ sterivex","Deep seawater in situ sterivex", "Near vent BW in situ sterivex","Near vent BW Grazing T0","Near vent BW Grazing T24","Near vent BW Grazing T36","Mt Edwards Plume in situ sterivex","Mt Edwards Vent in situ SUPR","Mt Edwards Vent Grazing T0","Mt Edwards Vent Grazing T36","Venti Latte Vent in situ SUPR","Venti Latte Vent Grazing T0","Venti Latte Vent Grazing T36","Candelabra Plume in situ sterivex","Candelabra Vent in situ SUPR","Candelabra Vent Grazing T24","SirVentsAlot Vent in situ SUPR","SirVentsAlot Vent Grazing T24")
 
@@ -973,8 +1009,8 @@ supp_table_ASV <- gr_counts_avg_wtax %>%
 # write_delim(supp_table_ASV, path = "Suppl-18s-asv-total.txt", delim = "\t")
 ```
 
-
 Plot factoring and parameters, ahead of bar plot (Figure 2)
+
 ```{r factor for plotting}
 level2ORDER <- c("Alveolata-Ciliates","Alveolata-Dinoflagellates","Alveolata-Syndiniales","Alveolata-Other","Rhizaria-Cercozoa","Rhizaria-Radiolaria","Rhizaria-Other","Stramenopiles-MAST","Stramenopiles-Ochrophyta","Stramenopiles-Bicoecea","Stramenopiles-Other","Hacrobia-Cryptophyta","Hacrobia-Haptophyta","Hacrobia-Other","Amoebozoa","Excavata","Apusozoa","Archaeplastida-Chlorophyta","Archaeplastida-Other","Opisthokonta-Fungi","Opisthokonta-Metazoa","Opisthokonta-Other","Unassigned-Eukaryote")
 level2ORDER_LABEL <- c("Alveolates-Ciliates","Alveolates-Dinoflagellates","Alveolates-Syndiniales","Alveolates-Other","Rhizaria-Cercozoa","Rhizaria-Radiolaria","Rhizaria-Other","Stramenopiles-MAST","Stramenopiles-Ochrophytes","Stramenopiles-Bicoecea","Stramenopiles-Other","Hacrobia-Cryptophytes","Hacrobia-Haptophytes","Hacrobia-Other","Amoebozoa","Excavates","Apusozoa","Archaeplastid-Chlorophytes","Archaeplastid-Other","Opisthokont-Fungi","Opisthokont-Metazoa","Opisthokont-Other","Unassigned-Eukaryote")
@@ -1003,7 +1039,9 @@ gr_counts_wreps_TAXA$LOCATION_ORDER <- factor(gr_counts_wreps_TAXA$LocationName,
 ```
 
 ### Protist community bar plots
+
 Created a function to plot protist bar plots. This way we can plot samples averaged across replicates (Figure 2) and by individual samples.
+
 ```{r plot function 18s bar plot}
 barplot_lev2 <- function(df){
   ggplot(df, aes(x=SAMPLE_ORDER, y=SUM, fill=LEVEL2ORDER)) +
@@ -1017,7 +1055,8 @@ barplot_lev2 <- function(df){
           panel.background = element_blank(),
           axis.text.x = element_text(angle=90, hjust=1, vjust=0.5, color = "black", size = 12),
           axis.text.y = element_text(color="black", size = 12),
-          axis.title = element_text(color="black", size = 12),
+          axis.title = element_text(color="black", size = 14),
+          legend.text = element_text(color = "black", size = 14),
           strip.text = element_blank(),
           legend.title = element_blank()) +
     labs(x="", y="Relative abundance")+
@@ -1037,7 +1076,8 @@ barplot_lev2_wreps <- function(df){
           axis.text.x = element_text(angle=90, hjust=1, 
                                      vjust=0.5, color = "black", size = 12),
           axis.text.y = element_text(color="black", size = 12),
-          axis.title = element_text(color="black", size = 12),
+          axis.title = element_text(color="black", size = 14),
+          legend.text = element_text(color = "black", size = 14),
           strip.text = element_blank(),
           legend.title = element_blank()) +
     labs(x="", y="Relative abundance")+
@@ -1050,6 +1090,7 @@ rm <- c("Unassigned", "Opisthokonta-Other", "Opisthokonta-Fungi", "Opisthokonta-
 ```
 
 Protist bar plots with all replicates/samples.
+
 ```{r Figure taxa with all replicates, fig.height = 10, fig.width = 16}
 # svg("figs/barplot-taxalevel-wReps.svg", h = 9, w = 13)
 barplot_lev2_wreps(gr_counts_wreps_TAXA)
@@ -1057,13 +1098,15 @@ barplot_lev2_wreps(gr_counts_wreps_TAXA)
 ```
 
 Bar plot for Figure 2.
+
 ```{r Figure generation-all, fig.height = 8, fig.width = 10}
 rm <- c("Unassigned", "Opisthokonta-Other", "Opisthokonta-Fungi", "Opisthokonta-Metazoa")
 nometaz_all <- barplot_lev2(filter(gr_counts_avg_TAXA, !(Taxa %in% rm)))
 nometaz_all
 ```
 
-Generate protist bar plot with only in situ samples for presentation purposes and an additional plot with metazoa. _Not report in manuscript_.
+Generate protist bar plot with only in situ samples for presentation purposes and an additional plot with metazoa. *Not report in manuscript*.
+
 ```{r Supplemental plot with metazoa, fig.height = 8, fig.width = 8}
 # svg("figs/SUPPLEMENTARY-GR-tax-barplot-wmetaz.svg", w = 10, h = 8)
 # barplot_lev2(filter(gr_counts_avg_TAXA))
@@ -1076,8 +1119,6 @@ Generate protist bar plot with only in situ samples for presentation purposes an
 # barplot_lev2(filter(gr_counts_avg_TAXA, !(Taxa %in% rm) & SAMPLEID %in% insitu))
 # dev.off()
 ```
-
-
 
 ## Ordination analysis
 
@@ -1111,6 +1152,7 @@ gr_nums_wide <- counts_decont %>%
 ```
 
 ### Cluster analysis
+
 ```{r Average hierarchical clustering}
 # Fix column names
 gr_for_dendro <- gr_nums_wide
@@ -1130,6 +1172,7 @@ gr_dendro <- dendro_data(dendro, type = "rectangle")
 ```
 
 Plot base dendrogram.
+
 ```{r Base dendrogram plot, fig.height=8, fig.width=10}
 gr_dendro_plot <- ggplot(segment(gr_dendro)) + 
   geom_segment(aes(x = x, y = y, xend = xend, yend = yend)) + 
@@ -1148,10 +1191,10 @@ gr_dendro_plot
 ```
 
 ### Data transformation-CLR
+
 Transform ASV count data using center log-ratio. Look at eigenvalues after PCA analysis to determine how many axes are appropriate to show diversity among samples.
 
 **Reference**: Coenen, A.R., Hu, S.K., Luo, E., Muratore, D., and Weitz, J.S. (2020) A Primer for Microbiome Time-Series Analysis. Front Genet 11: 310.
-
 
 ```{r Make screeplot,fig.height=4, fig.width=6}
 # CLR
@@ -1170,9 +1213,10 @@ barplot(variance_lr,
 
 > Based on this screeplot - 2 axis are OK, as they show 0.079 and 0.077, respectively, of the variance.
 
-
 ## Plot PCA
+
 Extract PCA data points from analysis.
+
 ```{r Extract points}
 # Extract PCA points
 pca_lr_frame<-data.frame(pca_lr$x, SAMPLE=rownames(pca_lr$x))
@@ -1184,6 +1228,7 @@ pca_lr_frame_wNames <- pca_lr_frame %>%
 ```
 
 Factor for plotting.
+
 ```{r Factor for PCA plot}
 sample_order_all <- c("Shallow seawater","Deep seawater","Near vent BW","Mt Edwards Plume","Mt Edwards Vent","Venti Latte Vent","Candelabra Plume","Candelabra Vent","SirVentsAlot Vent")
 sample_label_all <- c("Shallow BSW","Deep BSW","Near vent BW","Mt. Edwards Plume","Mt. Edwards","Venti latte","Candelabra Plume","Candelabra","Sir Ventsalot")
@@ -1216,13 +1261,16 @@ pca_18s <- ggplot(pca_lr_frame_wNames,
   scale_color_manual(values = color_color) +
   theme_bw() +
   theme(axis.text = element_text(color="black", size=12),
-        legend.title = element_blank())
+        legend.title = element_blank(),
+        axis.title = element_text(color="black", size=14),
+        legend.text = element_text(color = "black", size = 14))
 # pca_18s
 ```
 
 ## Plot Figure 2 - bar plot & PCA
-```{r plot, fig.height=8, fig.width=18}
-# svg("figs/panel-barplot-pca-18S-nolabel.svg", w = 18, h = 8)
+
+```{r plot, fig.height=8, fig.width=20}
+# svg("figs/panel-barplot-pca-18S-nolabel.svg", w = 20, h = 8)
 plot_grid(nometaz_all, pca_18s, nrow = 1, 
           labels = c("a", "b"), rel_widths = c(1,0.85),
           align = c("hv"), axis = c("tblr")) 
@@ -1230,9 +1278,11 @@ plot_grid(nometaz_all, pca_18s, nrow = 1,
 ```
 
 # Classify 18S ASVs by distribution
-To test the hypothesis that protistan species may be enriched at vent sites compared to surrounding seawater, 18S-derived ASVs were characterized by distribution.   
+
+To test the hypothesis that protistan species may be enriched at vent sites compared to surrounding seawater, 18S-derived ASVs were characterized by distribution.
 
 Import data and classify ASVs
+
 ```{r set envs and import data}
 # Import averaged across replicates data
 load("data-input/GordaRidge-ASVtable-avg.RData",verbose = T)
@@ -1241,7 +1291,9 @@ load("data-input/GordaRidge-ASVtable-avg.RData",verbose = T)
 ```
 
 ## Categorize ASVs based on presence
+
 Classify resident versus cosmopolitan
+
 ```{r Convert to wide}
 gr_wide <- gr_counts_avg_wtax %>% 
   type.convert(as.is = TRUE) %>%
@@ -1257,6 +1309,7 @@ gr_wide <- gr_counts_avg_wtax %>%
 ```
 
 Import classification definition.
+
 ```{r Add categorized columns, message=FALSE, warning=FALSE}
 classifcation_schema <- read.delim("data-input/vent-asv-classification.txt")
 
@@ -1298,7 +1351,9 @@ gr_classified <- gr_wide %>%
 ```
 
 ### Combine distribution with original ASV table
+
 Print report on total ASV counts that fall into each category.
+
 ```{r Join with 18S count data, warning=FALSE, message=FALSE}
 gr_sorted <- left_join(gr_counts_avg_wtax, gr_classified) %>%
   filter(!(Sampletype == "Control"))
@@ -1353,6 +1408,7 @@ gr_dist_grazing <- gr_sorted %>%
 ```
 
 Include distribution with taxonomic annotations
+
 ```{r Join datasets, warning=FALSE, message=FALSE}
 
 gr_stats_wtax <- left_join(gr_counts_avg_wtax, gr_dist) %>%
@@ -1389,6 +1445,7 @@ gr_wtax_dist_detailed <- gr_stats_wtax %>%
 ```
 
 ## Plot ASV & sequence abundance by distribution
+
 Generate bar plot that summarized sequence and ASV abundance by distribution of ASV. Simple distribution determined above mentioned in text of manuscript, more detailed outline of ASV classifications for the supplementary section.
 
 ```{r Refined data for plotting, message=FALSE}
@@ -1427,6 +1484,7 @@ names(category_color) <- category_order
 ```
 
 Generate plots.
+
 ```{r Plot total sequences by distribution}
 totalseq <- ggplot(gr_stats_wtax_toplot, aes(x=SAMPLE_ORDER, y=sumseqs, fill=CATEGORY_ORDER)) +
   geom_bar(stat = "identity", color = "black", position = "fill") + 
@@ -1469,6 +1527,7 @@ totalasv <- ggplot(gr_stats_wtax_toplot, aes(x=SAMPLE_ORDER, y= totalasvs, fill=
 ```
 
 Generate supplementary figure that summarizes resident versus cosmopolitan ASVs by ASV and sequence count.
+
 ```{r Supplmentary figure with all ASV categories, fig.height=8, fig.width=16}
 # Supplementary figure
 # svg("figs/SUPPLEMENTARY-seq-asv-distribution.svg", h = 8, w = 16)
@@ -1479,7 +1538,6 @@ plot_grid(totalseq + labs(y="Relative sequence abundance") + theme(legend.positi
 # dev.off()
 ```
 
-
 ```{r Save output dataframes for future use, categorized ASVs}
 # save(gr_stats_wtax_toplot, gr_stats_wtax, gr_dist_grazing, gr_dist, file = "data-input/GR-countinfo-withASVdistribution.RData")
 
@@ -1489,8 +1547,8 @@ plot_grid(totalseq + labs(y="Relative sequence abundance") + theme(legend.positi
 # gr_stats_wtax_tplot = summarized for making figures
 ```
 
-
 # Protistan distribution & diversity
+
 ```{r Import data}
 load("data-input/GordaRidge-ASVtable-avg.RData",verbose=T)
 load("data-input/GR-countinfo-withASVdistribution.RData", verbose=T)
@@ -1505,6 +1563,7 @@ unique(gr_stats_wtax$Taxa)
 ```
 
 This is a another function for further refinement of the taxonomic assignments.
+
 ```{r Refine protistan taxonomic assignment}
 # Add Taxa2 level
 expand_taxa2 <- function(df){
@@ -1593,6 +1652,7 @@ gr_counts_avg_wtax2 <- expand_taxa2(gr_stats_wtax)
 ```
 
 ## Include ASV distribution
+
 ```{r Add ASV distribution information, message=FALSE, warning=FALSE}
 # Add categories & set up for plotting function
 gr_tax_res <- gr_counts_avg_wtax2 %>% 
@@ -1603,6 +1663,7 @@ gr_tax_res <- gr_counts_avg_wtax2 %>%
 ```
 
 Option to export a series of tables for supplementary information.
+
 ```{r Export table for supplementary, message=FALSE, warning=FALSE}
 # Make table summarizing taxa stats for each sample.
 asv_seq_taxa <- gr_tax_res %>% 
@@ -1628,6 +1689,7 @@ asv_seq_taxa2 <- gr_tax_res %>%
 ```
 
 ID most abundant ASVs
+
 ```{r Isolate most abundant ASVs, warning=FALSE, message=FALSE}
 # What are the most abundant ASVs in each of the taxa2 categories?
 gr_topASV_taxa2 <- gr_tax_res %>% 
@@ -1645,6 +1707,7 @@ gr_topASV_taxa2 <- gr_tax_res %>%
 ```
 
 Formatting to generate tile plot.
+
 ```{r factor and plot function}
 sample_order_all<-c("Shallow seawater in situ sterivex","Deep seawater in situ sterivex", "Near vent BW in situ sterivex","Near vent BW Grazing T0","Near vent BW Grazing T24","Near vent BW Grazing T36","Mt Edwards Plume in situ sterivex","Mt Edwards Vent in situ SUPR","Mt Edwards Vent Grazing T0","Mt Edwards Vent Grazing T36","Venti Latte Vent in situ SUPR","Venti Latte Vent Grazing T0","Venti Latte Vent Grazing T36","Candelabra Plume in situ sterivex","Candelabra Vent in situ SUPR","Candelabra Vent Grazing T24","SirVentsAlot Vent in situ SUPR","SirVentsAlot Vent Grazing T24")
 
@@ -1654,6 +1717,7 @@ gr_tax_res$SAMPLE_ORDER <- factor(gr_tax_res$sample, levels = sample_order_all, 
 ```
 
 Perform CLR transformation.
+
 ```{r Format dataframe include all samples}
 # Format input data frame to plot heatmap across resident and cosmopolitan populations.
 tax_key <- gr_tax_res %>% 
@@ -1756,6 +1820,7 @@ gr_relAbun_toheat$SAMPLENAME<-factor(gr_relAbun_toheat$SAMPLE, levels = sample_o
 ```
 
 Generate tile plot function with CLR heat map and bubble plot representing ASV richness.
+
 ```{r tile plot code, fig.width=8, fig.height=10}
 # Make geom tile plot relative abundance
 
@@ -1821,6 +1886,7 @@ tile_tax_CLR <- ggplot(gr_relAbun_toheat, aes(x = SAMPLENAME,
 ```
 
 Figure 3 plot
+
 ```{r Tile plot with CLR, fig.height=8, fig.width=16}
 green_pink <- c("#8e0152","#c51b7d","#de77ae","#f1b6da","#f7f7f7","#b8e186","#7fbc41","#4d9221","#276419")
 # svg("figs/Tileplot-CLR-21-04-2021.svg", h = 8, w = 16)
@@ -1832,6 +1898,7 @@ plot_grid(
 ```
 
 Extra tile plot for presentations with the insitu samples only.
+
 ```{r In situ only tile plot extra, fig.height=8, fig.width=13}
 # head(gr_relAbun_toheat)
 # svg("insitu-tileplot.svg", h=8, w = 13)
@@ -1841,7 +1908,6 @@ Extra tile plot for presentations with the insitu samples only.
 #   richness_plot, ncol = 2, axis = c("tb"), align = c("hv"))
 # dev.off()
 ```
-
 
 # Process 16S rRNA amplicon
 
@@ -1882,6 +1948,7 @@ rm <- c("NA108003STEP", "NA108039STEP", "NA108087STEP")
 ```
 
 Report stats on 16S tag-sequence data.
+
 ```{r Stats on original 16S data}
 tmp <- countbac %>%
   select(-all_of(rm)) %>% 
@@ -1893,6 +1960,7 @@ length(unique(tmp$Feature.ID)) # Total ASVs
 ```
 
 ## Format 16S ASV table for bar plot
+
 ```{r format plot for plotting, message=FALSE, warning=FALSE}
 bac_df_plot <- countbac %>%
   separate(Taxon, sep = ";D_[[:digit:]]__", into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), remove = TRUE, extra = "merge") %>% # Warnings are OK with NAs
@@ -1904,7 +1972,9 @@ bac_df_plot <- countbac %>%
   data.frame
 # head(bac_df_plot)
 ```
+
 Sequence and ASV stats for 16S amplicon dataset
+
 ```{r Get stats after quality control}
 # head(bac_df_plot)
 sum(bac_df_plot$value) # total sequences
@@ -1912,6 +1982,7 @@ length(unique(bac_df_plot$Feature.ID)) # total ASVs
 ```
 
 Subset 16S ASVs by abundance.
+
 ```{r subset to include abundant ASVs}
 bac_df_filtered <- bac_df_plot %>% 
   ungroup() %>% 
@@ -1927,9 +1998,11 @@ bac_df_filtered <- bac_df_plot %>%
 ```
 
 ## Curate 16S taxonomic assignment
-Here we are curating the 16S taxonomy assignments so we can get an informative look at the in situ bacteria population diversity and biogeography. Places ASVs below a user designated _THRESHOLD_ into the "Other" category - ASVs that make up < X% of the total data set. For this work, a threshold of 0.1% was used. The other curation of taxonomic assignment was to highlight those groups known to inhabit the region or other chemosynthetic habitats.
+
+Here we are curating the 16S taxonomy assignments so we can get an informative look at the in situ bacteria population diversity and biogeography. Places ASVs below a user designated *THRESHOLD* into the "Other" category - ASVs that make up \< X% of the total data set. For this work, a threshold of 0.1% was used. The other curation of taxonomic assignment was to highlight those groups known to inhabit the region or other chemosynthetic habitats.
 
 Function to modify 16S taxonomy
+
 ```{r Curate 16S taxonomy - function}
 # Add a column for updated taxonomy name
 curate_16s_tax <- function(df, THRESHOLD){
@@ -1965,6 +2038,7 @@ curate_16s_tax <- function(df, THRESHOLD){
 ```
 
 Removal of known Kitome contamination.
+
 ```{r Modify 16S data, message=FALSE}
 # head(bac_df_plot) # Add updated taxa list to this dataframe
 # unique(bac_df_plot$LocationName)
@@ -1978,7 +2052,6 @@ tax_16s <- bac_wcuratedtax %>%
 # write_delim(tax_16s, path = "tax-key-16s-21-08-2020.txt", delim = "\t")
 ```
 
-
 ```{r Average across and save}
 # Average sequence count for ASVs across replicates (by location name)
 bac_gr_avg <- bac_wcuratedtax %>% 
@@ -1990,7 +2063,9 @@ bac_gr_avg <- bac_wcuratedtax %>%
 ```
 
 ## Prepare 16S dataframe for plotting
+
 Average across replicates and sum to taxa
+
 ```{r 16S taxonomy average and summary, warning=FALSE, message=FALSE}
 # update exisiting taxonomy
 bac_wcuratedtax_toplot <- bac_wcuratedtax %>% 
@@ -2007,6 +2082,7 @@ bac_wcuratedtax_toplot$LOCATION <- factor(bac_wcuratedtax_toplot$LocationName, l
 ```
 
 Generate 16S bar plots
+
 ```{r 16S barplot}
 tax_color<-c("#7fcdbb","#014636","#41b6c4","#016c59","#d0d1e6","#02818a","#a6bddb","#3690c0","#00441b","#99d8c9","#006d2c","#66c2a4","#238b45","#c7e9b4","#fdd0a2","#fd8d3c","#d94801","#7f2704","#dadaeb","#54278f","#bcbddc","#6a51a3","#9e9ac8","#8c6bb1","#737373")
 
@@ -2036,18 +2112,22 @@ barplot_16s <- function(df){
 ```
 
 Remove unused samples and make supplementary bar plot.
+
 ```{r Plot 16S, fig.height=8, fig.width=8}
 rm_loc <- c("Purple Rain Vent", "Octopus Springs Vent", "Blue Ciliate")
 barplot_16s(bac_wcuratedtax_toplot %>% filter(!(LOCATION %in% rm_loc)))
 ```
 
 16S barplot with all samples.
+
 ```{r extra plot, fig.height=8, fig.width=8}
 # barplot_16s(bac_wcuratedtax_toplot)
 ```
 
 ## Ordination analysis for 16S results.
+
 Format ahead of data transformation of 16S analysis.
+
 ```{r Transform for ordination}
 # head(bac_wcuratedtax)
 rm_loc <- c("Purple Rain Vent", "Octopus Springs Vent", "Blue Ciliate")
@@ -2065,6 +2145,7 @@ bac_df_num <- bac_wcuratedtax %>%
 ```
 
 CLR transformation for 16S amplicons.
+
 ```{r CLR transform for 16S, fig.height=4, fig.width=5}
 library(compositions)
 df_log_clr <- data.frame(clr(t(bac_df_num)))
@@ -2084,7 +2165,9 @@ barplot(check_variance,
 ```
 
 ### Plot 16S PCA
+
 Extract samples and include metadata
+
 ```{r Add metadata}
 # Convert to dataframe and parse metadata
 df_pca_clr <- data.frame(pca_clr$x, SAMPLENAME = rownames(pca_clr$x))
@@ -2095,7 +2178,9 @@ df_pca_clr_wnames <- df_pca_clr %>%
 # head(df_pca_clr_wnames)
 unique(df_pca_clr_wnames$LocationName)
 ```
+
 Factor for plotting
+
 ```{r 16S PCA factoring}
 sample_order_all_16s <- c("Candelabra Vent","Mt Edwards Vent","Sir Ventsalot","Venti Latte Vent","Deep seawater","Shallow seawater","Near vent BW","Candelabra Plume","Mt Edwards Plume")
 all <- c("#dfa837","#61ac86","#ce536b","#711518","#413f44","#bfbbb0","#6f88af","#dfa837","#61ac86")
@@ -2103,7 +2188,7 @@ names(sample_color_all) <- sample_order_all_16s
 shapes <- c(21, 21, 21, 21, 22, 22, 23, 24, 24)
 df_pca_clr_wnames$SAMPLE_ORDER <- factor(df_pca_clr_wnames$LocationName, levels = sample_order_all_16s)
 ```
- 
+
 ```{r format for plot, warning=FALSE, message=FALSE, fig.height=5, fig.width=6.5}
 pca_16s <- ggplot(df_pca_clr_wnames, aes(x = PC1, y = PC2, fill = SAMPLE_ORDER, shape = SAMPLE_ORDER, color = SAMPLE_ORDER)) +
   geom_point(aes(x = PC1,y = PC2, fill = SAMPLE_ORDER, shape = SAMPLE_ORDER, color = SAMPLE_ORDER), size = 4) +
@@ -2120,6 +2205,7 @@ pca_16s <- ggplot(df_pca_clr_wnames, aes(x = PC1, y = PC2, fill = SAMPLE_ORDER, 
 ```
 
 Supplementary plot with 16S information.
+
 ```{r Plot panel 16s, fig.height=8, fig.width=19}
 # svg("16s-panel-supplementary.svg", w=16, h=8)
 plot_grid(
@@ -2130,10 +2216,13 @@ plot_grid(
 ```
 
 # Correlation analysis: 18S-16S
-Use these ASVs downstream to explore hypotheses with correlation results. Below set up 16S and 18S rRNA gene output data as phyloseq objects to import into SPIEC-EASI. Following SPIEC-EASI analysis, export as dataframe, add metadata, and process. 
+
+Use these ASVs downstream to explore hypotheses with correlation results. Below set up 16S and 18S rRNA gene output data as phyloseq objects to import into SPIEC-EASI. Following SPIEC-EASI analysis, export as dataframe, add metadata, and process.
 
 ## Prepare 16S and 18S data for correlation analysis:
-Format input 18S and 16S data, save for correlation analysis. Only _in situ_ samples that were found in both the 18S rRNA and 16S rRNA gene amplicon results were considered for the network analysis. Both datasets were subsampled to include ASVs that appeared in at least 3 samples, had at least 50 sequences each, and made up at least 0.001% of the sequenced reads.
+
+Format input 18S and 16S data, save for correlation analysis. Only *in situ* samples that were found in both the 18S rRNA and 16S rRNA gene amplicon results were considered for the network analysis. Both datasets were subsampled to include ASVs that appeared in at least 3 samples, had at least 50 sequences each, and made up at least 0.001% of the sequenced reads.
+
 ```{r load 16S and 18S data}
 # Import curated 16S and 18S datasets
 load("data-input/GR-countinfo-withASVdistribution.RData", verbose=T)
@@ -2141,7 +2230,8 @@ load("data-input/GR-countinfo-withASVdistribution.RData", verbose=T)
 bac_wtax <- read.delim("data-input/16s-gr-data-curated-avg.txt")
 ```
 
-Subset _in situ_ samples.
+Subset *in situ* samples.
+
 ```{r Select equivalent locations for 16S and 18S}
 # unique(gr_stats_wtax$LocationName)
 # unique(bac_wtax$LocationName)
@@ -2154,7 +2244,6 @@ bac_wtax_mod <- bac_wtax %>%
     TRUE ~ as.character(LocationName)
   ))
 ```
-
 
 ```{r Sort and filter eukaryote ASVs to consider}
 # Sort and filter eukaryote ASVs to consider:
@@ -2215,12 +2304,16 @@ length(unique(bac_wtax$Feature.ID)); length(unique(bac_data_interact$FEATURE))
 ```
 
 Save subset 16S and 18S data.
+
 ```{r Save these objects}
 # save(euk_data_interact, bac_data_interact, file = "data-input/Filtered-correlation-R-objects-10-11-2020.RData")
+# load("data-input/Filtered-correlation-R-objects-10-11-2020.RData")
 ```
 
 ### Import as phyloseq objects
+
 Phyloseq import for 18S data.
+
 ```{r Import euk data into phyloseq}
 euk_df <- euk_data_interact %>% 
   pivot_wider(names_from = LocationName, values_from = COUNT, values_fill = 0) %>% 
@@ -2241,6 +2334,7 @@ euk_phy
 ```
 
 Phyloseq import for 16S data.
+
 ```{r Repeat phyloseq import for 16S data}
 bac_df <- bac_data_interact %>% 
   pivot_wider(names_from = LocationName, values_from = COUNT, values_fill = 0) %>% 
@@ -2260,6 +2354,7 @@ bac_phy
 ```
 
 Save 16S and 18S phyloseq R objects to run Spiec-easi.
+
 ```{r Save phyloseq objects}
 # save phyloseq objects to run SpiecEasi in another script
 save(bac_phy, euk_phy, file = "data-input/phyloseq-18s-16s-12-11-2020.RData")
@@ -2267,7 +2362,8 @@ save(bac_phy, euk_phy, file = "data-input/phyloseq-18s-16s-12-11-2020.RData")
 # ?spiec.easi
 ```
 
-### SPIEC-EASI 
+### SPIEC-EASI
+
 18S rRNA and 16S rRNA gene datasets were each center-log ratio transformed then SPIEC-EASI was run using the Meinshausen-Buhlmann's neighborhood selection estimation method.
 
 SPIEC EASI was run on the HPC, due to computational load. Commented out commands below detail the run process, where both 16S and 18S data were used. Save output and bring locally below.
@@ -2304,6 +2400,7 @@ SPIEC EASI was run on the HPC, due to computational load. Commented out commands
 ```
 
 ### Process SPIEC-EASI output locally
+
 Transform into dataframes to look at relationship of pairs. Available on GitHub repo. Significant interactions to infer putative predator-prey relationships were determined by subsetting only interactions between 18S rRNA and 16S rRNA-derived ASVs.
 
 ```{r Import spieceasi output}
@@ -2313,6 +2410,7 @@ load("data-input/gr-spieceasi-objs-12-11-2020.RData", verbose = T)
 ```
 
 Import taxonomy keys from previously formatted data tables.
+
 ```{r Make taxonomy keys}
 countbac <- read.delim("data-input/CountTable-wtax-16s-plus3-2020-06-23.txt")
 # colnames(countbac)
@@ -2336,6 +2434,7 @@ tax_key_se <- euk_data_interact %>%
 ```
 
 Format SPIEC EASI output. Select Prok-Euk and Euk-Prok interactiosn only.
+
 ```{r Reformat Spiec Easi output}
 reformat_spieceasi <- function(df_in){
   interaction <- c("PROK-EUK", "EUK-PROK")
@@ -2392,14 +2491,15 @@ complete_list <- adj_sig %>%
 ```
 
 Option to save supplementary tables to analyze data outside of R.
+
 ```{r Save outputs from spiec easi}
 # write_delim(complete_list, path = "Complete-cross-domain-interactions.txt", delim = "\t")
 # Write to visualize in cytoscape
 # write.csv(complete_list, "cross-domain-gr.csv")
 ```
 
-
 ## Compare relationships at the taxonomic group level
+
 Of the interactions between 18S- and 16S-derived data, we are interested in capturing the putative predator prey relationships
 
 ```{r Retrieve total number of significant interactions}
@@ -2474,8 +2574,8 @@ tax_interact_cor <- tax_sum_interact %>%
 # View(tax_sum_interact)
 ```
 
-
 Plot distribution of 16S-18S interactions
+
 ```{r Prep data ahead of alluvial Factor for protists}
 library(ggalluvial)
 # head(tax_sum_interact)
@@ -2502,9 +2602,10 @@ donut_joint_tax <- c("Alveolata-Ciliates","Alveolata-Dinoflagellates","Alveolata
 putative_prey$TAX_ORDER_BAC <- factor(putative_prey$TAX_SHORT.B, levels = donut_joint_tax)
 ```
 
-Generate series of alluvial donut plots. Compile plots outside of R for Figure 4.  
+Generate series of alluvial donut plots. Compile plots outside of R for Figure 4.
 
 Alluvial donut for protists.
+
 ```{r protist alluvial, fig.height=12, fig.width=24}
 # svg("figs/alluvial-donut-resident.svg", h = 12, w = 24)
 putative_prey %>%
@@ -2550,6 +2651,7 @@ ggplot(aes(axis1 = LEVEL2ORDER, axis2 = TAX_ORDER_BAC, y = count_sum)) +
 ```
 
 Format and factor for prokaryote alluvial plots.
+
 ```{r Factor individual bacteria alluvial pies}
 bac_resident_putative_prey <- putative_prey %>%
   # Resident only
@@ -2573,8 +2675,8 @@ bac_cosmo_putative_prey$BAC_COS <- factor(bac_cosmo_putative_prey$TAX_SHORT.B, l
 names(bac_col_cos) <- bac_tax_cos
 ```
 
-
 Alluvial donut for bacteria and archaea
+
 ```{r Alluvial for 16S, fig.height=12, fig.width=14}
 # svg("figs/alluvial-donut-resident-16S.svg", h = 12, w = 24)
 ggplot(bac_resident_putative_prey, aes(axis1 = LEVEL2ORDER, axis2 = BAC_RES, y = count_sum)) +
@@ -2613,9 +2715,8 @@ ggplot(bac_cosmo_putative_prey, aes(axis1 = LEVEL2ORDER, axis2 = BAC_COS, y = co
 # dev.off()
 ```
 
-
-
 # Compare grazing rates and environmental information
+
 ```{r Import values}
 gr <- read.delim("data-input/Grazing-calc-wCarbon-results.txt")
 env <- read.delim("data-input/GR-environ-SAMPLE.txt")
@@ -2623,6 +2724,7 @@ env
 ```
 
 Join environmental and grazing data.
+
 ```{r Join data}
 gr_env <- gr %>% 
   left_join(env, by = "SAMPLE") %>% 
@@ -2636,6 +2738,7 @@ unique(gr_env$Grazing_variable)
 ```
 
 Run regression analysis.
+
 ```{r Regression}
 library(broom)
 regression_gr_tmp <- gr_env %>%
@@ -2672,6 +2775,7 @@ regression_gr_env <- gr_env %>%
 ```
 
 Factor results for plots.
+
 ```{r Factoring regression}
 sampleorder <- c("Near vent BW","Mt Edwards","Venti latte","Candelabra","SirVentsalot")
 sampleorder_names <- c("Near vent BW","Mt. Edwards","Venti latte","Candelabra","Sir Ventsalot")
@@ -2690,6 +2794,7 @@ regression_gr_env$ENV_LABEL <- factor(regression_gr_env$Env_variable, levels = c
 ```
 
 Generate plot for supplementary.
+
 ```{r Plot relationships, message=FALSE,fig.height=10, fig.width=10}
 # X = GrazingRate_hr, Prok_turnover, ugC_L_perday
 # Y = DEPTH, TEMP, PH, MG, SEA_PER, MICRO
@@ -2759,11 +2864,8 @@ plot_grid(
 # dev.off()
 ```
 
-
-
 # Session Info
+
 ```{r}
 sessionInfo()
 ```
-
-
